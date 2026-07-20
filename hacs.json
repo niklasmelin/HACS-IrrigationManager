@@ -4,7 +4,7 @@
   "documentation": "https://github.com/niklasmelin/HACS-IrrigationManager",
   "country": "SE",
   "categories": ["sensor", "switch"],
-  "version": "0.4",
+  "version": "0.5",
   "codeowners": ["@niklasmelin"],
   "homeassistant": "2024.6.0",
   "config_flow": true
