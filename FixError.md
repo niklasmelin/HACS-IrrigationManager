@@ -1,207 +1,130 @@
-# FixErrors.md
+# Solar Irrigation Integration Recovery Plan
 
-# Solar Irrigation HACS Integration -- Issues Found
+## Objective
 
-This document summarizes the issues found during the review and
-recommends fixes.
+Bring the integration into compliance with Home Assistant's Config Entry
+architecture and make it production-ready.
 
-## 1. Platform forwarding missing (**Critical**)
+## Phase 1 -- Restore Initialization (Highest Priority)
 
-### Problem
+### Task 1: Create the DataUpdateCoordinator
 
-`__init__.py` does not forward the config entry to any Home Assistant
-platforms.
+-   Instantiate `SolarIrrigationCoordinator` in `async_setup_entry()`.
+-   Call `await coordinator.async_config_entry_first_refresh()`.
+-   Abort setup cleanly if the first refresh fails.
 
-Current code attempts to execute:
+**Acceptance** - Coordinator starts. - Initial sensor values are
+available.
 
-``` python
-await hass.async_add_executor_job(
-    entry.data.get("setup_platforms", lambda: None)
-)
-```
+### Task 2: Store coordinator
 
-`setup_platforms` does not exist in `entry.data`, therefore no entities
-are ever loaded.
-
-### Fix
-
-Define:
+Store:
 
 ``` python
-PLATFORMS = ["sensor"]
-```
-
-(or additional platforms when implemented)
-
-Then use:
-
-``` python
-await hass.config_entries.async_forward_entry_setups(
-    entry,
-    PLATFORMS,
-)
-```
-
-During unload:
-
-``` python
-await hass.config_entries.async_unload_platforms(
-    entry,
-    PLATFORMS,
-)
-```
-
-------------------------------------------------------------------------
-
-## 2. Coordinator never instantiated (**Critical**)
-
-### Problem
-
-`SolarIrrigationCoordinator` exists but is never created.
-
-### Fix
-
-Inside `async_setup_entry()`:
-
-``` python
-coordinator = SolarIrrigationCoordinator(...)
-await coordinator.async_config_entry_first_refresh()
-
 hass.data.setdefault(DOMAIN, {})
 hass.data[DOMAIN][entry.entry_id] = coordinator
 ```
 
-Entities should retrieve the coordinator from `hass.data`.
+Never store a single global coordinator.
 
-------------------------------------------------------------------------
+### Task 3: Entity access
 
-## 3. Entity selector configuration
+Update every entity platform to retrieve the coordinator using
+`hass.data[DOMAIN][entry.entry_id]`.
 
-### Problem
+## Phase 2 -- Entity Lifecycle
 
-Selectors use:
+### Task 4: Verify platform forwarding
 
-``` python
-selector.EntitySelector()
-```
-
-which accepts any entity.
-
-### Fix
-
-Use:
+Ensure:
 
 ``` python
-selector.EntitySelector(
-    selector.EntitySelectorConfig(domain="sensor")
-)
+PLATFORMS=["sensor","switch"]
+await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 ```
 
-and
+### Task 5: Correct unload
+
+Unload platforms first, then remove only:
 
 ``` python
-selector.EntitySelector(
-    selector.EntitySelectorConfig(domain="switch")
-)
+hass.data[DOMAIN].pop(entry.entry_id)
 ```
 
-------------------------------------------------------------------------
+Do not remove the entire domain.
 
-## 4. Constant naming typo
+## Phase 3 -- Services
 
-### Problem
+### Task 6
 
-The constant `CONF_IRrigation_ENTITY` has inconsistent capitalization.
+Register services in Python:
 
-### Fix
+-   solar_irrigation.run_now
+-   solar_irrigation.stop
 
-Rename everywhere to:
+Keep `services.yaml` as documentation only.
 
-``` python
-CONF_IRRIGATION_ENTITY
-```
+## Phase 4 -- Coordinator Responsibilities
 
-Update all imports and references.
+Move all business logic into the coordinator:
 
-------------------------------------------------------------------------
+-   Read configured sensors
+-   Validate numeric values
+-   Calculate expected solar
+-   Calculate scale factor
+-   Calculate irrigation runtime
+-   Publish coordinator data
 
-## 5. Add async_setup()
+Entities must only display coordinator state.
 
-Recommended:
+## Phase 5 -- Irrigation Controller
 
-``` python
-async def async_setup(hass, config):
-    return True
-```
+Create a dedicated controller responsible for:
 
-------------------------------------------------------------------------
+-   Daily scheduling
+-   Pump on/off
+-   Runtime timer
+-   Last execution persistence
+-   Restart recovery
 
-## 6. Services are documented but not registered
+Avoid embedding this logic in sensor entities.
 
-### Problem
+## Phase 6 -- Robustness
 
-`services.yaml` documents services only.
+Handle:
 
-### Fix
+-   unavailable
+-   unknown
+-   non-numeric
+-   negative values
+-   unavailable switch
 
-Register services in `async_setup()` using:
+Log meaningful errors and skip irrigation safely.
 
-``` python
-hass.services.async_register(...)
-```
+## Phase 7 -- Testing
 
-------------------------------------------------------------------------
+Functional tests:
 
-## 7. Update interval units
+1.  Config Flow
+2.  Coordinator startup
+3.  Entity creation
+4.  Runtime calculation
+5.  Manual services
+6.  Daily schedule
+7.  Restart recovery
+8.  Unload/reload
+9.  Invalid sensors
+10. Multiple config entries
 
-### Problem
+## Definition of Done
 
-Coordinator currently uses:
-
-``` python
-timedelta(seconds=update_interval)
-```
-
-Configuration implies minutes or hours.
-
-### Fix
-
-Use:
-
-``` python
-timedelta(minutes=update_interval)
-```
-
-or make the unit explicit in the configuration flow.
-
-------------------------------------------------------------------------
-
-## 8. Verify manifest.json
-
-Ensure it contains:
-
-``` json
-{
-  "config_flow": true
-}
-```
-
-without this the Config Flow will never start.
-
-------------------------------------------------------------------------
-
-# Recommended implementation order
-
-1.  Fix `__init__.py`
-2.  Instantiate the coordinator
-3.  Forward platforms
-4.  Correct constant names
-5.  Register services
-6.  Verify `manifest.json`
-7.  Test Config Flow
-8.  Test entity creation
-9.  Test irrigation execution
-10. Add unit tests
-
-Following this order will align the integration with the standard Home
-Assistant architecture.
+-   Integration installs via HACS.
+-   Config Flow completes successfully.
+-   Coordinator refreshes correctly.
+-   Entities are created.
+-   Services work.
+-   Irrigation executes once per day.
+-   Restart recovery works.
+-   Clean unload/reload.
+-   No Home Assistant startup exceptions.
+-   Passes Home Assistant quality checks.
