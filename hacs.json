@@ -1,10 +1,4 @@
 {
-  "name": "Solar Irrigation",
-  "description": "Automatically determines irrigation duration based on solar energy production.",
-  "documentation": "https://github.com/niklasmelin/HACS-IrrigationManager",
-  "country": "SE",
-  "categories": ["sensor", "switch"],
-  "version": "0.2",
-  "codeowners": ["@niklasmelin"],
-  "homeassistant": "2026.12.0"
+  "name": "Solar Irrigation Manager",
+  "render_readme": true,
 }
