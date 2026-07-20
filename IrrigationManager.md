@@ -59,16 +59,35 @@ custom_components/
         strings.json
         translations/
             en.json
-
-Additional files
-
 README.md
 LICENSE
 hacs.json
 
 Use Config Entries only.
-
 Do NOT use YAML configuration.
+
+---
+
+# hacs.json
+
+Version bumping
+Always bump the version in the hacs.json file when releasing a new version of the integration. Use semantic versioning (e.g., 0.1, 0.2 etc.). 
+1. Minior version for no-braking changes 0.X
+2. Major version for breaking changes Y.0 
+Ask if you are unsure if the changes are breaking or not.
+
+
+Content of hacs.json:
+{
+  "name": "Solar Irrigation",
+  "description": "Automatically determines irrigation duration based on solar energy production.",
+  "documentation": "https://github.com/niklasmelin/HACS-IrrigationManager",
+  "country": "SE",
+  "categories": ["sensor", "switch"],
+  "version": "X.Y",
+  "codeowners": ["@niklasmelin"],
+  "homeassistant": "2026.06.0"
+}
 
 ---
 
