@@ -1,0 +1,8 @@
+# Solar Irrigation services
+solar_irrigation:
+  run_now:
+    name: Run Irrigation Now
+    description: Runs irrigation immediately using the latest calculated runtime.
+  stop:
+    name: Stop Irrigation
+    description: Stops irrigation immediately.

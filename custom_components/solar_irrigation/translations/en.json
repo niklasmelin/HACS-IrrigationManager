@@ -1,0 +1,31 @@
+{
+    "config": {
+        "flow_title": "Solar Irrigation",
+        "step": {
+            "user": {
+                "title": "Configure Solar Irrigation",
+                "description": "Please configure the Solar Irrigation integration.",
+                "data": {
+                    "solar_sensor": "Solar Energy Today Sensor",
+                    "remaining_sensor": "Remaining Solar Production Sensor",
+                    "irrigation_entity": "Irrigation Switch Entity",
+                    "max_solar": "Maximum Daily Solar Production (kWh)",
+                    "max_runtime": "Maximum Irrigation Runtime (minutes)",
+                    "update_interval": "Update Interval (seconds)"
+                }
+            }
+        }
+    },
+    "entity": {
+        "sensor": {
+            "expected_solar_today": "Expected Solar Today",
+            "solar_scale_factor": "Solar Scale Factor",
+            "irrigation_runtime": "Irrigation Runtime",
+            "irrigation_runtime_seconds": "Irrigation Runtime Seconds",
+            "irrigation_status": "Irrigation Status"
+        },
+        "switch": {
+            "irrigation_switch": "Irrigation Switch"
+        }
+    }
+}

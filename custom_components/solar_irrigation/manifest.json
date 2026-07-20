@@ -1,0 +1,10 @@
+{
+  "name": "Solar Irrigation",
+  "domain": "solar_irrigation",
+  "version": "0.1.0",
+  "requirements": [],
+  "dependencies": ["sensor", "switch"],
+  "codeowners": ["@your-github-username"],
+  "documentation": "https://github.com/your-username/ha-solar-irrigation",
+  "iot_class": "local_push"
+}
