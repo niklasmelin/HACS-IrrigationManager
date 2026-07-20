@@ -70,7 +70,7 @@ class SolarIrrigationCoordinator(DataUpdateCoordinator):
             "runtime_seconds": runtime_seconds,
             "status": "idle"
         }
-    
+
     def _get_sensor_value(self, entity_id):
         """Get sensor value from HA entity."""
         if not entity_id:

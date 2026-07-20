@@ -1,7 +1,7 @@
 {
   "name": "Solar Irrigation",
   "domain": "solar_irrigation",
-  "version": "0.3",
+  "version": "0.6",
   "requirements": [],
   "dependencies": ["sensor", "switch"],
   "codeowners": ["@niklasmelin"],

@@ -14,7 +14,7 @@ _LOGGER = logging.getLogger(__name__)
 
 async def async_setup_entry(hass: HomeAssistant, entry: dict[str, Any]) -> bool:
     """Set up Solar Irrigation switch from config entry."""
-    # This function would be called to set up switches
+    # This function is called from the main init.py when platforms are loaded
     return True
 
 class SolarIrrigationSwitch(CoordinatorEntity):
