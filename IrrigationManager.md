@@ -70,14 +70,27 @@ Do NOT use YAML configuration.
 
 # hacs.json
 
-Version bumping
-Always bump the version in the hacs.json file when releasing a new version of the integration. Use semantic versioning (e.g., 0.1, 0.2 etc.). 
+Content of hacs.json should normally not be changed.
+
+{
+  "name": "Solar Irrigation Manager",
+  "domains": ["SolarIrrigation"],
+  "render_readme": true,
+  "content_in_root": false,
+  "homeassistant": "2024.6.0"
+}
+
+# manifext.json
+
+Used only for version bumping. All other information is static according to the here defined content template.
+
+
+Always bump the version in the manifest.json file when releasing a new version of the integration. Use semantic versioning (e.g., 0.1, 0.2, 1.0 etc.). 
 1. Minior version for no-braking changes 0.X
 2. Major version for breaking changes Y.0 
 Ask if you are unsure if the changes are breaking or not.
 
-
-Content of hacs.json:
+Content of manifest.json:
 {
   "name": "Solar Irrigation",
   "description": "Automatically determines irrigation duration based on solar energy production.",

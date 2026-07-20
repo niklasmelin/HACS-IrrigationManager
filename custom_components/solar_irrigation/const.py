@@ -10,7 +10,7 @@ DOMAIN = "solar_irrigation"
 # Configuration
 CONF_SOLAR_SENSOR = "solar_sensor"
 CONF_REMAINING_SENSOR = "remaining_sensor"
-CONF_IRrigation_ENTITY = "irrigation_entity"
+CONF_IRRIGATION_ENTITY = "irrigation_entity"
 CONF_MAX_SOLAR = "max_solar"
 CONF_MAX_RUNTIME = "max_runtime"
 CONF_UPDATE_INTERVAL = "update_interval"

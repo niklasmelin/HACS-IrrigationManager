@@ -9,7 +9,7 @@ from homeassistant.helpers import selector
 from .const import (
     CONF_SOLAR_SENSOR,
     CONF_REMAINING_SENSOR,
-    CONF_IRrigation_ENTITY,
+    CONF_IRRIGATION_ENTITY,
     CONF_MAX_SOLAR,
     CONF_MAX_RUNTIME,
     CONF_UPDATE_INTERVAL,
@@ -28,11 +28,17 @@ class SolarIrrigationConfigFlow(config_entries.ConfigFlow, domain="solar_irrigat
         if user_input is not None:
             return self.async_create_entry(title="Solar Irrigation", data=user_input)
 
-        # Define the configuration schema
+        # Define the configuration schema with proper entity selectors
         data_schema = vol.Schema({
-            vol.Required(CONF_SOLAR_SENSOR): selector.EntitySelector(),
-            vol.Required(CONF_REMAINING_SENSOR): selector.EntitySelector(),
-            vol.Required(CONF_IRrigation_ENTITY): selector.EntitySelector(),
+            vol.Required(CONF_SOLAR_SENSOR): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Required(CONF_REMAINING_SENSOR): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="sensor")
+            ),
+            vol.Required(CONF_IRRIGATION_ENTITY): selector.EntitySelector(
+                selector.EntitySelectorConfig(domain="switch")
+            ),
             vol.Optional(CONF_MAX_SOLAR, default=DEFAULT_MAX_SOLAR): vol.All(
                 vol.Coerce(float), vol.Range(min=0)
             ),
