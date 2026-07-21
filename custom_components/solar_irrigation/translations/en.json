@@ -1,33 +1,112 @@
 {
-    "en": {
-        "entity": {
-            "solar_irrigation": {
-                "expected_solar_today": "Expected Solar Today",
-                "solar_scale_factor": "Solar Scale Factor",
-                "irrigation_runtime": "Irrigation Runtime",
-                "irrigation_runtime_seconds": "Irrigation Runtime Seconds",
-                "irigation_status": "Irrigation Status",
-                "last_irrigation": "Last Irrigation"
-            }
-        },
-        "state": {
-            "irigation_status": {
-                "idle": "Idle",
-                "scheduled": "Scheduled",
-                "running": "Running",
-                "completed": "Completed",
-                "error": "Error"
-            }
-        },
-        "services": {
-            "run_now": {
-                "name": "Run Irrigation Now",
-                "description": "Immediately run irrigation for the calculated duration"
-            },
-            "stop": {
-                "name": "Stop Irrigation",
-                "description": "Stop irrigation immediately"
-            }
+  "title": "Solar Irrigation",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure Solar Irrigation",
+        "description": "Configure solar production, the irrigation entity, and optional rain adjustment.",
+        "data": {
+          "solar_sensor": "Solar energy produced sensor",
+          "remaining_sensor": "Remaining solar forecast sensor",
+          "irrigation_entity": "Irrigation switch or valve",
+          "rain_sensor": "Rain sensor (optional)",
+          "max_solar": "Solar production for full irrigation",
+          "max_runtime": "Maximum irrigation runtime",
+          "rain_skip_threshold": "Rain amount that skips irrigation",
+          "update_interval": "Calculation update interval",
+          "schedule_time": "Daily irrigation time"
         }
+      },
+      "init": {
+        "title": "Update Solar Irrigation options",
+        "description": "Change source entities, calculation limits, rain handling, or schedule.",
+        "data": {
+          "solar_sensor": "Solar energy produced sensor",
+          "remaining_sensor": "Remaining solar forecast sensor",
+          "irrigation_entity": "Irrigation switch or valve",
+          "rain_sensor": "Rain sensor (optional)",
+          "max_solar": "Solar production for full irrigation",
+          "max_runtime": "Maximum irrigation runtime",
+          "rain_skip_threshold": "Rain amount that skips irrigation",
+          "update_interval": "Calculation update interval",
+          "schedule_time": "Daily irrigation time"
+        }
+      }
+    },
+    "error": {
+      "invalid_entity": "The selected entity does not exist.",
+      "unavailable": "The selected sensor is unavailable.",
+      "not_numeric": "The selected sensor does not have a numeric state.",
+      "invalid_unit": "The selected sensor uses an unsupported unit.",
+      "invalid_value": "The value must be finite and within the supported range."
+    },
+    "abort": {
+      "already_configured": "This irrigation entity is already configured."
     }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Update Solar Irrigation options",
+        "description": "Change source entities, calculation limits, rain handling, or schedule.",
+        "data": {
+          "solar_sensor": "Solar energy produced sensor",
+          "remaining_sensor": "Remaining solar forecast sensor",
+          "irrigation_entity": "Irrigation switch or valve",
+          "rain_sensor": "Rain sensor (optional)",
+          "max_solar": "Solar production for full irrigation",
+          "max_runtime": "Maximum irrigation runtime",
+          "rain_skip_threshold": "Rain amount that skips irrigation",
+          "update_interval": "Calculation update interval",
+          "schedule_time": "Daily irrigation time"
+        }
+      }
+    },
+    "error": {
+      "invalid_entity": "The selected entity does not exist.",
+      "unavailable": "The selected sensor is unavailable.",
+      "not_numeric": "The selected sensor does not have a numeric state.",
+      "invalid_unit": "The selected sensor uses an unsupported unit.",
+      "invalid_value": "The value must be finite and within the supported range."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "actual_solar": {"name": "Actual solar"},
+      "remaining_solar": {"name": "Remaining solar"},
+      "expected_solar_today": {"name": "Expected solar today"},
+      "solar_scale_factor": {"name": "Solar scale factor"},
+      "rain_amount": {"name": "Rain amount"},
+      "rain_factor": {"name": "Rain factor"},
+      "irrigation_runtime": {"name": "Irrigation runtime"},
+      "irrigation_status": {
+        "name": "Irrigation status",
+        "state": {
+          "idle": "Idle",
+          "scheduled": "Scheduled",
+          "running": "Running",
+          "completed": "Completed",
+          "error": "Error"
+        }
+      }
+    }
+  },
+  "services": {
+    "run_now": {
+      "name": "Run irrigation now",
+      "description": "Start irrigation using the calculated runtime or an optional override.",
+      "fields": {
+        "entry_id": {"name": "Configuration entry", "description": "Entry ID to run."},
+        "duration": {"name": "Duration", "description": "Optional runtime in minutes."},
+        "ignore_rain": {"name": "Ignore rain", "description": "Allow a manual run despite rain."}
+      }
+    },
+    "stop": {
+      "name": "Stop irrigation",
+      "description": "Stop active irrigation.",
+      "fields": {
+        "entry_id": {"name": "Configuration entry", "description": "Entry ID to stop."}
+      }
+    }
+  }
 }

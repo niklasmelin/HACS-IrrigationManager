@@ -1,21 +1,37 @@
-# Services for Solar Irrigation Integration
 run_now:
-  name: Run Irrigation Now
-  description: Immediately run irrigation for the calculated duration
+  name: Run irrigation now
+  description: Start irrigation using the calculated runtime or an optional override.
   fields:
-    entity_id:
-      name: Irrigation Entity
-      description: The irrigation switch entity to activate
+    entry_id:
+      name: Configuration entry
+      description: Entry ID of the Solar Irrigation configuration to run.
       required: true
+      selector:
+        text:
     duration:
       name: Duration
-      description: Override duration in minutes (optional)
-      example: "30"
+      description: Optional runtime override in minutes.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 1440
+          step: 1
+          unit_of_measurement: min
+    ignore_rain:
+      name: Ignore rain
+      description: Allow a manual run even when the rain threshold is reached.
+      required: false
+      default: false
+      selector:
+        boolean:
 stop:
-  name: Stop Irrigation
-  description: Stop irrigation immediately
+  name: Stop irrigation
+  description: Stop the active irrigation run for one configuration entry.
   fields:
-    entity_id:
-      name: Irrigation Entity
-      description: The irrigation switch entity to deactivate
+    entry_id:
+      name: Configuration entry
+      description: Entry ID of the Solar Irrigation configuration to stop.
       required: true
+      selector:
+        text:

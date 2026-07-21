@@ -1,4 +1,4 @@
-"""Tests for Solar Irrigation integration setup and unloading."""
+"""Tests for Solar Irrigation setup, unloading, and runtime ownership."""
 
 from __future__ import annotations
 
@@ -8,70 +8,57 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.solar_irrigation.const import DOMAIN
+from custom_components.solar_irrigation.const import PLATFORMS
 
 
 async def test_setup_entry(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
 ) -> None:
-    """Test successful config-entry setup."""
+    """Test that setup stores typed runtime objects on the config entry."""
     mock_config_entry.add_to_hass(hass)
-
     with patch(
-        "custom_components.solar_irrigation."
-        "SolarIrrigationCoordinator.async_config_entry_first_refresh",
+        "custom_components.solar_irrigation.SolarIrrigationCoordinator."
+        "async_config_entry_first_refresh",
         new=AsyncMock(return_value=None),
     ):
-        setup_result = await hass.config_entries.async_setup(
-            mock_config_entry.entry_id
-        )
+        assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
         await hass.async_block_till_done()
 
-    assert setup_result is True
     assert mock_config_entry.state is ConfigEntryState.LOADED
-    assert DOMAIN in hass.data
+    assert mock_config_entry.runtime_data.coordinator is not None
+    assert mock_config_entry.runtime_data.controller is not None
 
 
 async def test_unload_entry(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
 ) -> None:
-    """Test successful config-entry unloading."""
+    """Test that unloading one entry releases its platforms cleanly."""
     mock_config_entry.add_to_hass(hass)
-
     with patch(
-        "custom_components.solar_irrigation."
-        "SolarIrrigationCoordinator.async_config_entry_first_refresh",
+        "custom_components.solar_irrigation.SolarIrrigationCoordinator."
+        "async_config_entry_first_refresh",
         new=AsyncMock(return_value=None),
     ):
-        assert await hass.config_entries.async_setup(
-            mock_config_entry.entry_id
-        )
+        assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
         await hass.async_block_till_done()
 
-    assert mock_config_entry.state is ConfigEntryState.LOADED
-
-    unload_result = await hass.config_entries.async_unload(
-        mock_config_entry.entry_id
-    )
+    assert await hass.config_entries.async_unload(mock_config_entry.entry_id)
     await hass.async_block_till_done()
-
-    assert unload_result is True
     assert mock_config_entry.state is ConfigEntryState.NOT_LOADED
 
 
-async def test_setup_forwards_platforms(
+async def test_setup_forwards_exact_platforms(
     hass: HomeAssistant,
     mock_config_entry: MockConfigEntry,
 ) -> None:
-    """Test that setup forwards the entry to its entity platforms."""
+    """Test that setup forwards only the declared platform tuple."""
     mock_config_entry.add_to_hass(hass)
-
     with (
         patch(
-            "custom_components.solar_irrigation."
-            "SolarIrrigationCoordinator.async_config_entry_first_refresh",
+            "custom_components.solar_irrigation.SolarIrrigationCoordinator."
+            "async_config_entry_first_refresh",
             new=AsyncMock(return_value=None),
         ),
         patch.object(
@@ -80,14 +67,7 @@ async def test_setup_forwards_platforms(
             new=AsyncMock(),
         ) as forward_mock,
     ):
-        assert await hass.config_entries.async_setup(
-            mock_config_entry.entry_id
-        )
+        assert await hass.config_entries.async_setup(mock_config_entry.entry_id)
         await hass.async_block_till_done()
 
-    forward_mock.assert_awaited_once()
-
-    entry, platforms = forward_mock.await_args.args
-
-    assert entry is mock_config_entry
-    assert platforms
+    forward_mock.assert_awaited_once_with(mock_config_entry, PLATFORMS)

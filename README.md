@@ -1,60 +1,29 @@
-# Solar Irrigation Integration
+# Solar Irrigation
 
-## Goal
+Solar Irrigation is a Home Assistant custom integration that calculates an irrigation runtime from current and forecast solar energy, optionally reduces that runtime using measured rain, and controls a configured switch or valve on a daily schedule.
 
-Create a Home Assistant custom integration distributed through HACS that automatically determines the required irrigation duration based on how much solar energy is (or is expected to be) produced during the current day.
+## Inputs
 
-The philosophy is simple:
+- Solar energy produced: Wh, kWh, or MWh.
+- Remaining solar forecast: Wh, kWh, or MWh.
+- Irrigation entity: switch or valve.
+- Rain sensor: optional; supports mm, cm, or inches.
 
-> More sun → More evaporation → More irrigation.
+When no rain sensor is configured, irrigation uses solar data only. When a rain sensor is configured and unavailable, coordinator data becomes unavailable and automatic irrigation does not start.
 
-Instead of using weather forecasts directly, use the home's photovoltaic production as the indicator of solar radiation.
+## Calculation
 
-## Functional Overview
+The integration normalizes solar energy to kWh, calculates a solar factor against the configured maximum, then multiplies the maximum runtime by the solar factor. With rain configured, the runtime is reduced linearly until the rain skip threshold is reached.
 
-The integration shall:
+## Services
 
-- Calculate expected total solar energy for today.
-- Calculate a scale factor relative to a configurable "perfect sunny day".
-- Calculate irrigation runtime.
-- Automatically start an irrigation switch/entity.
-- Stop irrigation when calculated runtime has elapsed.
+- `solar_irrigation.run_now`: manually start a calculated or overridden run.
+- `solar_irrigation.stop`: stop the active run.
 
-The integration shall expose all intermediate values as sensors.
+## Development
 
-## Integration Name
-
-Suggested domain:
-
-solar_irrigation
-
-Repository:
-
-ha-solar-irrigation
-
-## HACS Requirements
-
-Follow current Home Assistant integration best practices.
-
-Required files:
-
-custom_components/
-    solar_irrigation/
-        __init__.py
-        manifest.json
-        config_flow.py
-        coordinator.py
-        sensor.py
-        switch.py (optional)
-        services.yaml
-        const.py
-        irrigation.py
-        strings.json
-        translations/
-            en.json
-README.md
-LICENSE
-hacs.json
-
-Use Config Entries only.
-Do NOT use YAML configuration.
+```bash
+make setup_test_env
+make test
+make test-hassfest
+```
