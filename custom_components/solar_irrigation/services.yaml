@@ -1,22 +1,21 @@
 # Services for Solar Irrigation Integration
-services:
-  run_now:
-    name: Run Irrigation Now
-    description: Immediately run irrigation for the calculated duration
-    fields:
-      entity_id:
-        name: Irrigation Entity
-        description: The irrigation switch entity to activate
-        required: true
-      duration:
-        name: Duration
-        description: Override duration in minutes (optional)
-        example: "30"
-  stop:
-    name: Stop Irrigation
-    description: Stop irrigation immediately
-    fields:
-      entity_id:
-        name: Irrigation Entity
-        description: The irrigation switch entity to deactivate
-        required: true
+run_now:
+  name: Run Irrigation Now
+  description: Immediately run irrigation for the calculated duration
+  fields:
+    entity_id:
+      name: Irrigation Entity
+      description: The irrigation switch entity to activate
+      required: true
+    duration:
+      name: Duration
+      description: Override duration in minutes (optional)
+      example: "30"
+stop:
+  name: Stop Irrigation
+  description: Stop irrigation immediately
+  fields:
+    entity_id:
+      name: Irrigation Entity
+      description: The irrigation switch entity to deactivate
+      required: true

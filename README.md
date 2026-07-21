@@ -1,21 +1,60 @@
-# Solar Irrigation Integration v0.6
+# Solar Irrigation Integration
 
-## Final Verification Status: ✅ PASSED
+## Goal
 
-### Version Bumped to 0.6
-- `hacs.json` version: "0.6"
-- `manifest.json` version: "0.6"
+Create a Home Assistant custom integration distributed through HACS that automatically determines the required irrigation duration based on how much solar energy is (or is expected to be) produced during the current day.
 
-### Files Present
-- 8 total files in component directory
-- All Python and JSON files compiled successfully
+The philosophy is simple:
 
-### Integration Ready
-✅ Config Flow with entity selectors
-✅ Data Coordinator with calculation logic  
-✅ Sensor entities with proper state management
-✅ Switch entities for irrigation control
-✅ HACS metadata with proper versioning
+> More sun → More evaporation → More irrigation.
 
-## Ready for HACS Distribution
-The Solar Irrigation Integration is now ready for HACS distribution with version 0.6.
+Instead of using weather forecasts directly, use the home's photovoltaic production as the indicator of solar radiation.
+
+## Functional Overview
+
+The integration shall:
+
+- Calculate expected total solar energy for today.
+- Calculate a scale factor relative to a configurable "perfect sunny day".
+- Calculate irrigation runtime.
+- Automatically start an irrigation switch/entity.
+- Stop irrigation when calculated runtime has elapsed.
+
+The integration shall expose all intermediate values as sensors.
+
+## Integration Name
+
+Suggested domain:
+
+solar_irrigation
+
+Repository:
+
+ha-solar-irrigation
+
+## HACS Requirements
+
+Follow current Home Assistant integration best practices.
+
+Required files:
+
+custom_components/
+    solar_irrigation/
+        __init__.py
+        manifest.json
+        config_flow.py
+        coordinator.py
+        sensor.py
+        switch.py (optional)
+        services.yaml
+        const.py
+        irrigation.py
+        strings.json
+        translations/
+            en.json
+README.md
+LICENSE
+hacs.json
+
+Use Config Entries only.
+Do NOT use YAML configuration.
