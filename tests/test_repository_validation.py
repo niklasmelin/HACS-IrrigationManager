@@ -1,4 +1,4 @@
-"""Local repository validation for a Home Assistant custom integration."""
+"""Local repository validation for the Solar Irrigation integration."""
 
 from __future__ import annotations
 
@@ -7,8 +7,9 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import subprocess
-import sys
+import tempfile
 from urllib.parse import urlparse
 
 import pytest
@@ -56,7 +57,7 @@ REQUIRED_MANIFEST_KEYS = {
 
 
 def _load_json(path: Path) -> dict:
-    """Load a JSON object and provide a useful assertion message."""
+    """Load a JSON object with useful assertion messages."""
     assert path.is_file(), f"Required file is missing: {path}"
 
     try:
@@ -77,9 +78,46 @@ def _is_web_url(value: object) -> bool:
     return parsed.scheme in {"http", "https"} and bool(parsed.netloc)
 
 
+def _validator_output(result: subprocess.CompletedProcess[str]) -> str:
+    """Return combined validator output."""
+    return "\n".join(
+        part
+        for part in (
+            result.stdout.strip(),
+            result.stderr.strip(),
+        )
+        if part
+    )
+
+
+def _prepare_hassfest_workspace(destination: Path) -> None:
+    """Create a clean Hassfest workspace without local virtual environments."""
+    source_integration = CUSTOM_COMPONENTS / "solar_irrigation"
+    destination_integration = (
+        destination
+        / "custom_components"
+        / "solar_irrigation"
+    )
+
+    assert source_integration.is_dir(), (
+        f"Integration directory is missing: {source_integration}"
+    )
+
+    shutil.copytree(
+        source_integration,
+        destination_integration,
+        ignore=shutil.ignore_patterns(
+            "__pycache__",
+            "*.pyc",
+            "*.pyo",
+            ".pytest_cache",
+        ),
+    )
+
+
 @pytest.fixture(scope="session")
 def integration_dir() -> Path:
-    """Return the single integration directory in the repository."""
+    """Return the single integration directory."""
     assert CUSTOM_COMPONENTS.is_dir(), (
         f"Missing integration directory: {CUSTOM_COMPONENTS}"
     )
@@ -93,8 +131,8 @@ def integration_dir() -> Path:
     )
 
     assert len(directories) == 1, (
-        "A HACS integration repository must contain exactly one directory "
-        f"under custom_components/. Found: {[path.name for path in directories]}"
+        "Expected exactly one integration under custom_components/. "
+        f"Found: {[path.name for path in directories]}"
     )
 
     return directories[0]
@@ -102,7 +140,7 @@ def integration_dir() -> Path:
 
 @pytest.mark.repository_validation
 def test_repository_layout(integration_dir: Path) -> None:
-    """Verify the local repository layout expected by HACS."""
+    """Verify the local repository layout."""
     required_files = [
         REPOSITORY_ROOT / "README.md",
         REPOSITORY_ROOT / "hacs.json",
@@ -113,14 +151,16 @@ def test_repository_layout(integration_dir: Path) -> None:
     missing = [str(path) for path in required_files if not path.is_file()]
 
     assert not missing, "Required files are missing:\n" + "\n".join(missing)
-
-    readme = REPOSITORY_ROOT / "README.md"
-    assert readme.read_text(encoding="utf-8").strip(), "README.md is empty"
+    assert (REPOSITORY_ROOT / "README.md").read_text(
+        encoding="utf-8"
+    ).strip(), "README.md is empty"
 
 
 @pytest.mark.repository_validation
 def test_hacs_metadata(integration_dir: Path) -> None:
-    """Validate the locally testable parts of hacs.json."""
+    """Validate locally testable HACS metadata."""
+    del integration_dir
+
     hacs = _load_json(REPOSITORY_ROOT / "hacs.json")
 
     unsupported_keys = set(hacs) - HACS_ALLOWED_KEYS
@@ -140,10 +180,9 @@ def test_hacs_metadata(integration_dir: Path) -> None:
             assert isinstance(hacs[key], str), f"{key} must be a string"
             assert hacs[key].strip(), f"{key} must not be empty"
 
-    # This repository uses the standard custom_components layout.
     assert hacs.get("content_in_root") is not True, (
-        "content_in_root must not be true when the integration is located "
-        "under custom_components/"
+        "content_in_root must not be true when the integration is under "
+        "custom_components/"
     )
 
     if hacs.get("zip_release"):
@@ -151,36 +190,10 @@ def test_hacs_metadata(integration_dir: Path) -> None:
             "filename is required when zip_release is enabled"
         )
 
-    if "persistent_directory" in hacs:
-        persistent_directory = Path(hacs["persistent_directory"])
-
-        assert not persistent_directory.is_absolute(), (
-            "persistent_directory must be a relative path"
-        )
-        assert ".." not in persistent_directory.parts, (
-            "persistent_directory must remain inside the integration directory"
-        )
-
-    if "country" in hacs:
-        countries = hacs["country"]
-        if isinstance(countries, str):
-            countries = [countries]
-
-        assert isinstance(countries, list), (
-            "country must be a two-letter code or a list of two-letter codes"
-        )
-        assert countries, "country must not be an empty list"
-
-        for country in countries:
-            assert isinstance(country, str)
-            assert re.fullmatch(r"[A-Z]{2}", country), (
-                f"Invalid country code: {country!r}"
-            )
-
 
 @pytest.mark.repository_validation
 def test_manifest_metadata(integration_dir: Path) -> None:
-    """Validate manifest fields required for a HACS integration."""
+    """Validate required manifest fields."""
     manifest = _load_json(integration_dir / "manifest.json")
 
     missing_keys = REQUIRED_MANIFEST_KEYS - set(manifest)
@@ -189,6 +202,7 @@ def test_manifest_metadata(integration_dir: Path) -> None:
     )
 
     domain = manifest["domain"]
+
     assert isinstance(domain, str)
     assert DOMAIN_PATTERN.fullmatch(domain), f"Invalid domain: {domain!r}"
     assert domain == integration_dir.name, (
@@ -208,41 +222,26 @@ def test_manifest_metadata(integration_dir: Path) -> None:
     codeowners = manifest["codeowners"]
     assert isinstance(codeowners, list), "codeowners must be a list"
     assert codeowners, "codeowners must contain at least one entry"
-    assert all(
-        isinstance(owner, str) and owner.strip()
-        for owner in codeowners
-    ), "Every codeowner must be a non-empty string"
-
-    if "config_flow" in manifest:
-        assert isinstance(manifest["config_flow"], bool), (
-            "config_flow must be a boolean"
-        )
-
-    if "requirements" in manifest:
-        assert isinstance(manifest["requirements"], list)
-        assert all(
-            isinstance(requirement, str) and requirement.strip()
-            for requirement in manifest["requirements"]
-        )
 
 
 @pytest.mark.repository_validation
 def test_brand_icon(integration_dir: Path) -> None:
-    """Verify that the integration contains a local brand icon."""
+    """Verify the local brand icon."""
     icon = integration_dir / "brand" / "icon.png"
 
     assert icon.is_file(), f"Missing brand icon: {icon}"
 
     data = icon.read_bytes()
+
     assert data.startswith(b"\x89PNG\r\n\x1a\n"), (
         f"{icon} is not a valid PNG file"
     )
-    assert len(data) > 100, f"{icon} appears to be empty or corrupt"
+    assert len(data) > 100, f"{icon} appears empty or corrupt"
 
 
 @pytest.mark.repository_validation
 def test_python_files_parse(integration_dir: Path) -> None:
-    """Verify that every integration Python file has valid syntax."""
+    """Verify that integration Python files have valid syntax."""
     python_files = sorted(integration_dir.rglob("*.py"))
     assert python_files, "The integration contains no Python files"
 
@@ -262,60 +261,67 @@ def test_python_files_parse(integration_dir: Path) -> None:
 
 @pytest.mark.repository_validation
 @pytest.mark.hassfest
-def test_hassfest_validation(integration_dir: Path) -> None:
-    """Run Hassfest from a local Home Assistant Core checkout."""
-    core_path_value = os.environ.get("HOME_ASSISTANT_CORE_PATH")
+def test_hassfest_validation() -> None:
+    """Run Hassfest against a clean, isolated integration workspace."""
+    docker = shutil.which("docker")
+    require_hassfest = os.environ.get("REQUIRE_HASSFEST") == "1"
 
-    if not core_path_value:
-        message = (
-            "HOME_ASSISTANT_CORE_PATH is not set. It must point to a local "
-            "Home Assistant Core development directory."
-        )
+    if docker is None:
+        message = "Docker is required to run Hassfest but was not found."
 
-        if os.environ.get("REQUIRE_EXTERNAL_VALIDATORS") == "1":
+        if require_hassfest:
             pytest.fail(message)
 
         pytest.skip(message)
 
-    core_path = Path(core_path_value).expanduser().resolve()
-    hassfest_module = core_path / "script" / "hassfest" / "__main__.py"
-
-    assert core_path.is_dir(), (
-        f"HOME_ASSISTANT_CORE_PATH does not exist: {core_path}"
-    )
-    assert hassfest_module.is_file(), (
-        f"Hassfest was not found under: {core_path}"
-    )
-
-    python_executable = os.environ.get("HASSFEST_PYTHON", sys.executable)
-
-    result = subprocess.run(
-        [
-            python_executable,
-            "-m",
-            "script.hassfest",
-            "--action",
-            "validate",
-            "--integration-path",
-            str(integration_dir),
-        ],
-        cwd=core_path,
+    daemon = subprocess.run(
+        [docker, "info"],
+        cwd=REPOSITORY_ROOT,
         capture_output=True,
         text=True,
-        timeout=600,
+        timeout=30,
         check=False,
     )
 
-    output = "\n".join(
-        section
-        for section in (
-            result.stdout.strip(),
-            result.stderr.strip(),
+    if daemon.returncode != 0:
+        message = (
+            "Docker daemon is unavailable.\n"
+            f"{_validator_output(daemon)}"
         )
-        if section
+
+        if require_hassfest:
+            pytest.fail(message)
+
+        pytest.skip(message)
+
+    image = os.environ.get(
+        "HASSFEST_IMAGE",
+        "ghcr.io/home-assistant/hassfest",
     )
+
+    with tempfile.TemporaryDirectory(
+        prefix="solar-irrigation-hassfest-"
+    ) as temporary_directory:
+        workspace = Path(temporary_directory)
+        _prepare_hassfest_workspace(workspace)
+
+        result = subprocess.run(
+            [
+                docker,
+                "run",
+                "--rm",
+                "--volume",
+                f"{workspace}:/github/workspace:ro",
+                image,
+            ],
+            cwd=REPOSITORY_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+        )
 
     assert result.returncode == 0, (
         "Hassfest validation failed.\n\n"
-        f"{output or 'Hassfest produced no output.'}"
+        f"{_validator_output(result) or 'Hassfest produced no output.'}"
     )

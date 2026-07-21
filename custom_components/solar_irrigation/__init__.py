@@ -7,12 +7,15 @@ import logging
 from datetime import datetime
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
 from .coordinator import SolarIrrigationCoordinator
 from .progress import report_progress, update_integration_status
 
 _LOGGER = logging.getLogger(__name__)
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 # Define platforms to forward
 PLATFORMS = ["sensor", "switch"]

@@ -1,33 +1,78 @@
 {
-    "en": {
-        "entity": {
-            "solar_irrigation": {
-                "expected_solar_today": "Expected Solar Today",
-                "solar_scale_factor": "Solar Scale Factor",
-                "irrigation_runtime": "Irrigation Runtime",
-                "irrigation_runtime_seconds": "Irrigation Runtime Seconds",
-                "irigation_status": "Irrigation Status",
-                "last_irrigation": "Last Irrigation"
-            }
-        },
-        "state": {
-            "irigation_status": {
-                "idle": "Idle",
-                "scheduled": "Scheduled",
-                "running": "Running",
-                "completed": "Completed",
-                "error": "Error"
-            }
-        },
-        "services": {
-            "run_now": {
-                "name": "Run Irrigation Now",
-                "description": "Immediately run irrigation for the calculated duration"
-            },
-            "stop": {
-                "name": "Stop Irrigation",
-                "description": "Stop irrigation immediately"
-            }
+  "title": "Solar Irrigation",
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configure Solar Irrigation",
+        "description": "Configure the solar sensors and irrigation controller.",
+        "data": {
+          "solar_sensor": "Solar energy sensor",
+          "remaining_sensor": "Remaining solar energy sensor",
+          "irrigation_entity": "Irrigation switch",
+          "max_solar": "Maximum expected solar energy",
+          "max_runtime": "Maximum irrigation runtime",
+          "update_interval": "Update interval"
         }
+      }
+    },
+    "error": {
+      "invalid_sensor": "The selected sensor is invalid.",
+      "invalid_unit": "The selected sensor uses an unsupported unit.",
+      "invalid_value": "The entered value is invalid."
+    },
+    "abort": {
+      "already_configured": "This irrigation entity is already configured."
     }
+  },
+  "entity": {
+    "sensor": {
+      "expected_solar_today": {
+        "name": "Expected solar today"
+      },
+      "solar_scale_factor": {
+        "name": "Solar scale factor"
+      },
+      "irrigation_runtime": {
+        "name": "Irrigation runtime"
+      },
+      "irrigation_runtime_seconds": {
+        "name": "Irrigation runtime seconds"
+      },
+      "irrigation_status": {
+        "name": "Irrigation status",
+        "state": {
+          "idle": "Idle",
+          "scheduled": "Scheduled",
+          "running": "Running",
+          "completed": "Completed",
+          "error": "Error"
+        }
+      },
+      "last_irrigation": {
+        "name": "Last irrigation"
+      }
+    }
+  },
+  "services": {
+    "run_now": {
+      "name": "Run irrigation now",
+      "description": "Start an irrigation cycle immediately.",
+      "fields": {
+        "entry_id": {
+          "name": "Configuration entry",
+          "description": "The Solar Irrigation configuration entry to run."
+        }
+      }
+    },
+    "stop": {
+      "name": "Stop irrigation",
+      "description": "Stop the active irrigation cycle.",
+      "fields": {
+        "entry_id": {
+          "name": "Configuration entry",
+          "description": "The Solar Irrigation configuration entry to stop."
+        }
+      }
+    }
+  }
 }
