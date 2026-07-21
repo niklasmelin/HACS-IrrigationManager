@@ -1,119 +1,182 @@
-"""Data coordinator for Solar Irrigation integration."""
+"""Data coordinator for the Solar Irrigation integration."""
+
+from __future__ import annotations
 
 import logging
+import math
 from datetime import timedelta
-from typing import Dict, Any
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
-from homeassistant.util.dt import now
+from typing import Any
 
-from .const import DOMAIN, DEFAULT_MAX_SOLAR, DEFAULT_MAX_RUNTIME
-from .models import SolarIrrigationData
-from .progress import report_progress, update_integration_status
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN, UnitOfEnergy, UnitOfLength
+from homeassistant.core import HomeAssistant, State
+from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
+
+from .const import (
+    CM_TO_MM,
+    CONF_MAX_RUNTIME,
+    CONF_MAX_SOLAR,
+    CONF_RAIN_SENSOR,
+    CONF_RAIN_SKIP_THRESHOLD,
+    CONF_REMAINING_SENSOR,
+    CONF_SOLAR_SENSOR,
+    CONF_UPDATE_INTERVAL,
+    DEFAULT_MAX_RUNTIME,
+    DEFAULT_MAX_SOLAR,
+    DEFAULT_RAIN_SKIP_THRESHOLD,
+    DEFAULT_UPDATE_INTERVAL,
+    INCH_TO_MM,
+    MINUTES_TO_SECONDS,
+    MWH_TO_KWH,
+    WH_TO_KWH,
+)
+from .models import SolarIrrigationConfigEntry, SolarIrrigationData
 
 _LOGGER = logging.getLogger(__name__)
 
-class SolarIrrigationCoordinator(DataUpdateCoordinator):
-    """Data coordinator for Solar Irrigation."""
 
-    def __init__(self, hass: HomeAssistant, update_interval: int, entry_id: str):
-        """Initialize the coordinator."""
+class SolarIrrigationCoordinator(DataUpdateCoordinator[SolarIrrigationData]):
+    """Read source sensors and calculate irrigation requirements."""
+
+    config_entry: SolarIrrigationConfigEntry
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: SolarIrrigationConfigEntry,
+    ) -> None:
+        """Initialize the coordinator for one config entry."""
+        update_interval = int(_entry_value(entry, CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL))
         super().__init__(
             hass,
             _LOGGER,
-            name=DOMAIN,
+            config_entry=entry,
+            name=f"Solar Irrigation {entry.entry_id}",
             update_interval=timedelta(seconds=update_interval),
         )
-        self.hass = hass
-        self.entry_id = entry_id
-        report_progress("Coordinator initialized", "info")
-        update_integration_status("coordinator_ready")
 
-    async def _async_update_data(self) -> Dict[str, Any]:
-        """Fetch data from external API or sensors."""
-        _LOGGER.debug("Updating Solar Irrigation data")
-        report_progress("Starting data update cycle", "info")
-        update_integration_status("updating_data")
-        
-        # Get the config entry data
-        entry = self.config_entry
-        if not entry:
-            _LOGGER.warning("No config entry found")
-            report_progress("No config entry found", "warning")
-            raise UpdateFailed("No config entry")
-        
-        # Get sensor values from the configuration
-        solar_sensor = entry.data.get("solar_sensor")
-        remaining_sensor = entry.data.get("remaining_sensor")
-        max_solar = entry.data.get("max_solar", DEFAULT_MAX_SOLAR)  # Default 65 kWh
-        max_runtime = entry.data.get("max_runtime", DEFAULT_MAX_RUNTIME)  # Default 60 minutes
-        update_interval = entry.data.get("update_interval", 3600)  # Default 1 hour
-        
-        # Validate max solar value
+    async def _async_update_data(self) -> SolarIrrigationData:
+        """Read current states and return a normalized calculation result."""
+        try:
+            actual = self._read_energy_sensor(
+                str(_entry_value(self.config_entry, CONF_SOLAR_SENSOR, ""))
+            )
+            remaining = self._read_energy_sensor(
+                str(_entry_value(self.config_entry, CONF_REMAINING_SENSOR, ""))
+            )
+            max_solar = float(
+                _entry_value(self.config_entry, CONF_MAX_SOLAR, DEFAULT_MAX_SOLAR)
+            )
+            max_runtime = float(
+                _entry_value(self.config_entry, CONF_MAX_RUNTIME, DEFAULT_MAX_RUNTIME)
+            )
+            rain_entity = _entry_value(self.config_entry, CONF_RAIN_SENSOR, None)
+            rain_mm = self._read_rain_sensor(str(rain_entity)) if rain_entity else None
+            rain_threshold = float(
+                _entry_value(
+                    self.config_entry,
+                    CONF_RAIN_SKIP_THRESHOLD,
+                    DEFAULT_RAIN_SKIP_THRESHOLD,
+                )
+            )
+        except (TypeError, ValueError) as err:
+            raise UpdateFailed(str(err)) from err
+
         if max_solar <= 0:
-            _LOGGER.error("Max solar value must be greater than zero")
-            report_progress("Invalid max solar value", "error")
-            raise UpdateFailed("Invalid max solar value")
-        
-        # Read sensor values
-        solar_value = self._get_sensor_value(solar_sensor)
-        remaining_value = self._get_sensor_value(remaining_sensor)
-        report_progress("Retrieved sensor values", "info")
-        
-        # Validate sensor values
-        if solar_value is None or remaining_value is None:
-            _LOGGER.error("Could not read sensor values")
-            report_progress("Invalid sensor values", "error")
-            raise UpdateFailed("Invalid sensor values")
-        
-        # Validate that values are not negative
-        if solar_value < 0 or remaining_value < 0:
-            _LOGGER.error("Sensor values cannot be negative")
-            report_progress("Negative sensor values detected", "error")
-            raise UpdateFailed("Invalid sensor values: negative values detected")
-        
-        # Calculate expected solar energy
-        expected_solar = solar_value + remaining_value
-        report_progress("Calculated expected solar energy", "info")
-        
-        # Calculate scale factor (clamp between 0 and 1)
-        scale_factor = min(expected_solar / max_solar, 1.0)
-        scale_factor = max(scale_factor, 0.0)  # Ensure not negative
-        report_progress("Calculated scale factor", "info")
-        
-        # Calculate runtime
-        runtime_minutes = scale_factor * max_runtime
-        report_progress("Calculated runtime", "info")
-        
-        # Convert to seconds for precision
-        runtime_seconds = round(runtime_minutes * 60)
-        report_progress("Converted runtime to seconds", "info")
-        
-        # Return calculated data as a proper data class
-        result = SolarIrrigationData(
-            actual_solar_kwh=solar_value,
-            remaining_solar_kwh=remaining_value,
-            expected_solar_kwh=expected_solar,
-            scale_factor=scale_factor,
+            raise UpdateFailed("Maximum solar production must be greater than zero")
+        if max_runtime < 0:
+            raise UpdateFailed("Maximum runtime cannot be negative")
+        if rain_entity and rain_threshold <= 0:
+            raise UpdateFailed("Rain threshold must be greater than zero")
+
+        expected = actual + remaining
+        solar_factor = _clamp(expected / max_solar)
+        rain_factor = 1.0 if rain_mm is None else _clamp(1.0 - rain_mm / rain_threshold)
+        runtime_minutes = round(solar_factor * max_runtime * rain_factor, 3)
+        runtime_seconds = round(runtime_minutes * MINUTES_TO_SECONDS)
+        skip_reason = _skip_reason(expected, rain_mm, rain_threshold, runtime_seconds)
+
+        return SolarIrrigationData(
+            actual_solar_kwh=round(actual, 4),
+            remaining_solar_kwh=round(remaining, 4),
+            expected_solar_kwh=round(expected, 4),
+            solar_factor=round(solar_factor, 4),
+            rain_mm=None if rain_mm is None else round(rain_mm, 3),
+            rain_factor=round(rain_factor, 4),
             runtime_minutes=runtime_minutes,
             runtime_seconds=runtime_seconds,
-            calculated_at=now()
-        ).to_dict()
-        
-        report_progress("Data update completed successfully", "success")
-        update_integration_status("data_updated")
-        return result
+            skip_reason=skip_reason,
+            calculated_at=dt_util.utcnow(),
+        )
 
-    def _get_sensor_value(self, entity_id: str) -> float:
-        """Get sensor value from HA entity."""
+    def _read_energy_sensor(self, entity_id: str) -> float:
+        """Read a finite non-negative energy state and normalize it to kWh."""
+        value, unit = self._read_number_and_unit(entity_id)
+        if value < 0:
+            raise ValueError(f"Energy sensor {entity_id} cannot be negative")
+        if unit == UnitOfEnergy.WATT_HOUR:
+            return value * WH_TO_KWH
+        if unit == UnitOfEnergy.KILO_WATT_HOUR:
+            return value
+        if unit == UnitOfEnergy.MEGA_WATT_HOUR:
+            return value * MWH_TO_KWH
+        raise ValueError(f"Energy sensor {entity_id} has unsupported unit {unit!r}")
+
+    def _read_rain_sensor(self, entity_id: str) -> float:
+        """Read a finite non-negative precipitation state and normalize it to mm."""
+        value, unit = self._read_number_and_unit(entity_id)
+        if value < 0:
+            raise ValueError(f"Rain sensor {entity_id} cannot be negative")
+        if unit == UnitOfLength.MILLIMETERS:
+            return value
+        if unit == UnitOfLength.CENTIMETERS:
+            return value * CM_TO_MM
+        if unit == UnitOfLength.INCHES:
+            return value * INCH_TO_MM
+        raise ValueError(f"Rain sensor {entity_id} has unsupported unit {unit!r}")
+
+    def _read_number_and_unit(self, entity_id: str) -> tuple[float, str]:
+        """Return a finite numeric state and its required unit of measurement."""
         if not entity_id:
-            return None
-            
+            raise ValueError("A required sensor entity is not configured")
         state = self.hass.states.get(entity_id)
-        if state and state.state not in ["unknown", "unavailable"]:
-            try:
-                return float(state.state)
-            except ValueError:
-                _LOGGER.error(f"Could not convert sensor {entity_id} value to float: {state.state}")
-                report_progress(f"Failed to convert sensor {entity_id} value", "error")
-        return None
+        if state is None:
+            raise ValueError(f"Sensor {entity_id} does not exist")
+        if state.state in {STATE_UNKNOWN, STATE_UNAVAILABLE, ""}:
+            raise ValueError(f"Sensor {entity_id} is unavailable")
+        try:
+            value = float(state.state)
+        except (TypeError, ValueError) as err:
+            raise ValueError(f"Sensor {entity_id} is not numeric") from err
+        if not math.isfinite(value):
+            raise ValueError(f"Sensor {entity_id} must be finite")
+        unit = state.attributes.get("unit_of_measurement")
+        if not isinstance(unit, str) or not unit:
+            raise ValueError(f"Sensor {entity_id} has no unit of measurement")
+        return value, unit
+
+
+def _entry_value(entry: SolarIrrigationConfigEntry, key: str, default: Any) -> Any:
+    """Read a config option, falling back to immutable entry data."""
+    return entry.options.get(key, entry.data.get(key, default))
+
+
+def _clamp(value: float) -> float:
+    """Clamp a floating-point value to the inclusive range zero through one."""
+    return max(0.0, min(value, 1.0))
+
+
+def _skip_reason(
+    expected_solar: float,
+    rain_mm: float | None,
+    rain_threshold: float,
+    runtime_seconds: int,
+) -> str | None:
+    """Return the reason irrigation should be skipped, when applicable."""
+    if rain_mm is not None and rain_mm >= rain_threshold:
+        return "rain_threshold_reached"
+    if expected_solar <= 0:
+        return "no_solar"
+    if runtime_seconds <= 0:
+        return "zero_runtime"
+    return None

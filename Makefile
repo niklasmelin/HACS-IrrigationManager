@@ -21,6 +21,8 @@ COVERAGE_MIN ?= 85
 	test-repository \
 	test-hassfest \
 	test-coverage \
+	lint \
+	quality \
 	clean_test_env
 
 help: ## Display available Makefile commands
@@ -120,6 +122,12 @@ test-coverage: check_python_env ## Run behavioral tests with branch coverage enf
 		--cov-report=term-missing \
 		--cov-fail-under="$(COVERAGE_MIN)" \
 		-v
+
+
+lint: check_python_env ## Run style, import, and docstring checks
+	@"$(VENV_PYTHON)" -m ruff check custom_components/solar_irrigation tests
+
+quality: lint test-strict ## Run the complete release quality gate
 
 clean_test_env: ## Remove the local Python test environment and generated caches
 	@rm -rf "$(VENV)" .pytest_cache .coverage htmlcov

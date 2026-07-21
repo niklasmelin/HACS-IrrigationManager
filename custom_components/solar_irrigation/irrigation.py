@@ -1,74 +1,197 @@
-"""Irrigation controller for Solar Irrigation integration."""
+"""Safe irrigation execution and persistence support."""
 
-import logging
-from datetime import datetime, timedelta
+from __future__ import annotations
+
 import asyncio
+import logging
+from datetime import timedelta
 
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.storage import Storage
-from homeassistant.util.dt import now
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 
-from .const import DOMAIN
+from .const import (
+    CONF_IRRIGATION_ENTITY,
+    ControllerStatus,
+    STORAGE_KEY_TEMPLATE,
+    STORAGE_VERSION,
+)
+from .models import (
+    SolarIrrigationConfigEntry,
+    SolarIrrigationControllerState,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
-class SolarIrrigationController:
-    """Controller for managing irrigation operations."""
 
-    def __init__(self, hass: HomeAssistant, coordinator):
-        """Initialize the controller."""
+class SolarIrrigationController:
+    """Control one irrigation entity without overlapping execution."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: SolarIrrigationConfigEntry,
+    ) -> None:
+        """Initialize controller state, locking, and entry-specific storage."""
         self.hass = hass
-        self.coordinator = coordinator
-        self.storage_key = f"{DOMAIN}_storage"
-        
-    async def async_run_irrigation(self, entity_id, duration=None):
-        """Run irrigation for the specified duration."""
-        _LOGGER.info(f"Starting irrigation for {entity_id}")
-        
-        # Get current runtime from coordinator
-        if not self.coordinator.data or "runtime_seconds" not in self.coordinator.data:
-            _LOGGER.error("Cannot determine runtime for irrigation")
-            return False
-            
-        # If duration is provided, use that instead of calculated value
-        if duration:
-            runtime_seconds = duration * 60  # Convert minutes to seconds
-        else:
-            runtime_seconds = self.coordinator.data["runtime_seconds"]
-            
-        # Turn on the irrigation switch
-        await self._turn_on_switch(entity_id)
-        
-        # Wait for the runtime duration
-        await asyncio.sleep(runtime_seconds)
-        
-        # Turn off the irrigation switch
-        await self._turn_off_switch(entity_id)
-        
-        # Record the last execution
-        await self._record_execution()
-        
-        _LOGGER.info(f"Irrigation completed for {entity_id} for {runtime_seconds} seconds")
-        return True
-        
-    async def _turn_on_switch(self, entity_id):
-        """Turn on the irrigation switch."""
-        _LOGGER.debug(f"Turning on irrigation switch: {entity_id}")
-        service_data = {"entity_id": entity_id}
-        await self.hass.services.async_call("switch", "turn_on", service_data)
-        
-    async def _turn_off_switch(self, entity_id):
-        """Turn off the irrigation switch."""
-        _LOGGER.debug(f"Turning off irrigation switch: {entity_id}")
-        service_data = {"entity_id": entity_id}
-        await self.hass.services.async_call("switch", "turn_off", service_data)
-        
-    async def _record_execution(self):
-        """Record the last execution time."""
-        # This would typically save to storage
-        _LOGGER.debug("Recording execution time")
-        
-    async def async_stop_irrigation(self, entity_id):
-        """Stop irrigation immediately."""
-        _LOGGER.info(f"Stopping irrigation for {entity_id}")
-        await self._turn_off_switch(entity_id)
+        self.entry = entry
+        self.state = SolarIrrigationControllerState()
+        self._lock = asyncio.Lock()
+        self._run_task: asyncio.Task[None] | None = None
+        self._store: Store[dict[str, object]] = Store(
+            hass,
+            STORAGE_VERSION,
+            STORAGE_KEY_TEMPLATE.format(entry_id=entry.entry_id),
+        )
+
+    @property
+    def entity_id(self) -> str:
+        """Return the configured irrigation entity ID."""
+        return str(
+            self.entry.options.get(
+                CONF_IRRIGATION_ENTITY,
+                self.entry.data[CONF_IRRIGATION_ENTITY],
+            )
+        )
+
+    @property
+    def is_running(self) -> bool:
+        """Return whether an irrigation run is currently active."""
+        return self._run_task is not None and not self._run_task.done()
+
+    async def async_load(self) -> None:
+        """Load persisted controller state and enforce a safe restart state."""
+        stored = await self._store.async_load()
+        if stored:
+            self.state = SolarIrrigationControllerState.from_dict(stored)
+        if self.state.status is ControllerStatus.RUNNING:
+            await self._async_turn_off()
+            self.state.status = ControllerStatus.IDLE
+            self.state.active_started_at = None
+            self.state.active_end_at = None
+            self.state.last_error = "Recovered from an interrupted irrigation run"
+            await self._async_save()
+
+    async def async_run(
+        self,
+        duration_minutes: float | None = None,
+        *,
+        automatic: bool = False,
+        ignore_rain: bool = False,
+    ) -> bool:
+        """Start irrigation and schedule a safe stop after the selected duration."""
+        async with self._lock:
+            if self.is_running:
+                raise HomeAssistantError("Irrigation is already running")
+            data = self.entry.runtime_data.coordinator.data
+            if data is None:
+                raise HomeAssistantError("Irrigation calculation data is unavailable")
+            if data.rain_mm is not None and data.rain_factor <= 0 and not ignore_rain:
+                await self.async_record_skip(
+                    data.skip_reason or "rain_threshold_reached",
+                    automatic=automatic,
+                )
+                return False
+            duration_seconds = (
+                round(float(duration_minutes) * 60)
+                if duration_minutes is not None
+                else data.runtime_seconds
+            )
+            if duration_seconds <= 0:
+                await self.async_record_skip(
+                    data.skip_reason or "zero_runtime",
+                    automatic=automatic,
+                )
+                return False
+            await self._async_turn_on()
+            started = dt_util.utcnow()
+            self.state.status = ControllerStatus.RUNNING
+            self.state.active_started_at = started
+            self.state.active_end_at = started + timedelta(seconds=duration_seconds)
+            self.state.last_duration_seconds = duration_seconds
+            self.state.last_error = None
+            if automatic:
+                self.state.last_automatic_date = dt_util.as_local(started).date().isoformat()
+            await self._async_save()
+            self._run_task = self.hass.async_create_task(
+                self._async_complete_after(duration_seconds),
+                "solar_irrigation_run",
+            )
+            return True
+
+    async def async_stop(self, reason: str = "manual_stop") -> None:
+        """Stop any active run, turn off the valve, and persist final state."""
+        task = self._run_task
+        self._run_task = None
+        if task and not task.done() and task is not asyncio.current_task():
+            task.cancel()
+        try:
+            await self._async_turn_off()
+        finally:
+            self.state.status = ControllerStatus.COMPLETED
+            self.state.last_execution = dt_util.utcnow()
+            self.state.active_started_at = None
+            self.state.active_end_at = None
+            self.state.last_skip_reason = reason if reason != "completed" else None
+            await self._async_save()
+
+    async def async_record_skip(self, reason: str, *, automatic: bool) -> None:
+        """Record a safe skipped run without operating the irrigation entity."""
+        now = dt_util.utcnow()
+        self.state.status = ControllerStatus.COMPLETED
+        self.state.last_execution = now
+        self.state.last_skip_reason = reason
+        self.state.last_duration_seconds = 0
+        if automatic:
+            self.state.last_automatic_date = dt_util.as_local(now).date().isoformat()
+        await self._async_save()
+
+    def automatic_decision_made_today(self) -> bool:
+        """Return whether today's scheduled automatic decision is already stored."""
+        return self.state.last_automatic_date == dt_util.now().date().isoformat()
+
+    async def async_shutdown(self) -> None:
+        """Cancel timers and leave an active irrigation entity safely off."""
+        if self.is_running or self.state.status is ControllerStatus.RUNNING:
+            await self.async_stop("integration_unloaded")
+
+    async def _async_complete_after(self, duration_seconds: int) -> None:
+        """Wait for the run duration and then complete irrigation safely."""
+        try:
+            await asyncio.sleep(duration_seconds)
+            await self.async_stop("completed")
+        except asyncio.CancelledError:
+            raise
+        except Exception as err:  # pragma: no cover - defensive safety path
+            _LOGGER.exception("Unexpected irrigation timer failure")
+            self.state.status = ControllerStatus.ERROR
+            self.state.last_error = str(err)
+            await self._async_turn_off()
+            await self._async_save()
+
+    async def _async_turn_on(self) -> None:
+        """Call the configured entity domain's turn-on service."""
+        domain = self.entity_id.split(".", 1)[0]
+        service = "open_valve" if domain == "valve" else "turn_on"
+        await self.hass.services.async_call(
+            domain,
+            service,
+            {"entity_id": self.entity_id},
+            blocking=True,
+        )
+
+    async def _async_turn_off(self) -> None:
+        """Call the configured entity domain's turn-off service."""
+        domain = self.entity_id.split(".", 1)[0]
+        service = "close_valve" if domain == "valve" else "turn_off"
+        await self.hass.services.async_call(
+            domain,
+            service,
+            {"entity_id": self.entity_id},
+            blocking=True,
+        )
+
+    async def _async_save(self) -> None:
+        """Persist current controller state for restart recovery."""
+        await self._store.async_save(self.state.as_dict())
