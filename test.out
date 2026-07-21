@@ -5,8 +5,161 @@ rootdir: /home/niklas/Development/Irrigation
 configfile: pytest.ini
 plugins: pytest_freezer-0.4.9, timeout-2.4.0, respx-0.23.1, picked-0.5.1, asyncio-1.4.0, requests-mock-1.12.1, github-actions-annotate-failures-0.4.0, unordered-0.8.0, anyio-4.14.2, socket-0.8.0, syrupy-5.3.2, homeassistant-custom-component-0.13.346, cov-7.1.0, xdist-3.8.0, aiohttp-1.1.1
 asyncio: mode=Mode.AUTO, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
-collecting ... collected 15 items / 14 deselected / 1 selected
+collecting ... collected 15 items
 
-tests/test_repository_validation.py::test_hassfest_validation PASSED     [100%]
+tests/test_init.py::test_setup_entry PASSED                              [  6%]
+tests/test_init.py::test_unload_entry PASSED                             [ 13%]
+tests/test_init.py::test_setup_forwards_platforms PASSED                 [ 20%]
+tests/test_progress.py::test_progress_tracker_initialization PASSED      [ 26%]
+tests/test_progress.py::test_progress_reporting PASSED                   [ 33%]
+tests/test_progress.py::test_status_update PASSED                        [ 40%]
+tests/test_repository_validation.py::test_repository_layout PASSED       [ 46%]
+tests/test_repository_validation.py::test_hacs_metadata PASSED           [ 53%]
+tests/test_repository_validation.py::test_manifest_metadata PASSED       [ 60%]
+tests/test_repository_validation.py::test_brand_icon PASSED              [ 66%]
+tests/test_repository_validation.py::test_python_files_parse PASSED      [ 73%]
+tests/test_repository_validation.py::test_hassfest_validation PASSED     [ 80%]
+tests/test_solar_irrigation.py::test_async_setup_entry FAILED            [ 86%]
+tests/test_solar_irrigation.py::test_async_unload_entry FAILED           [ 93%]
+tests/test_solar_irrigation.py::test_domain_exists PASSED                [100%]
+ERROR: Coverage failure: total of 56 is less than fail-under=85
 
-======================= 1 passed, 14 deselected in 5.32s =======================
+
+=================================== FAILURES ===================================
+____________________________ test_async_setup_entry ____________________________
+
+hass = <MagicMock id='125129537326112'>
+mock_entry = <MagicMock id='125129537325776'>
+
+    @pytest.mark.asyncio
+    async def test_async_setup_entry(hass: HomeAssistant, mock_entry: ConfigEntry):
+        """Test async_setup_entry function."""
+        # Mock the coordinator and platforms
+        mock_coordinator = AsyncMock()
+        mock_entry.data = {"update_interval": 3600}
+    
+        # Test successful setup
+>       assert await async_setup_entry(hass, mock_entry) is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_solar_irrigation.py:35: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+custom_components/solar_irrigation/__init__.py:47: in async_setup_entry
+    coordinator = SolarIrrigationCoordinator(
+custom_components/solar_irrigation/coordinator.py:21: in __init__
+    super().__init__(
+.venv/lib/python3.14/site-packages/homeassistant/helpers/update_coordinator.py:101: in __init__
+    frame.report_usage(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+what = 'relies on ContextVar, but should pass the config entry explicitly.'
+
+    def report_usage(
+        what: str,
+        *,
+        breaks_in_ha_version: str | None = None,
+        core_behavior: ReportBehavior = ReportBehavior.ERROR,
+        core_integration_behavior: ReportBehavior = ReportBehavior.LOG,
+        custom_integration_behavior: ReportBehavior = ReportBehavior.LOG,
+        exclude_integrations: set[str] | None = None,
+        integration_domain: str | None = None,
+        level: int = logging.WARNING,
+    ) -> None:
+        """Report incorrect code usage.
+    
+        :param what: will be wrapped with "Detected that integration 'integration' {what}.
+        Please create a bug report at https://..."
+        :param breaks_in_ha_version: if set, the report will be adjusted to specify the
+        breaking version
+        :param exclude_integrations: skip specified integration when reviewing the stack.
+        If no integration is found, the core behavior will be applied
+        :param integration_domain: domain of the integration causing the issue. If None, the
+        stack frame will be searched to identify the integration causing the issue.
+        """
+        if (hass := _hass.hass) is None:
+>           raise RuntimeError("Frame helper not set up")
+E           RuntimeError: Frame helper not set up
+
+.venv/lib/python3.14/site-packages/homeassistant/helpers/frame.py:185: RuntimeError
+---------------------------- Captured stderr setup -----------------------------
+DEBUG:asyncio:Using selector: EpollSelector
+------------------------------ Captured log setup ------------------------------
+DEBUG    asyncio:selector_events.py:64 Using selector: EpollSelector
+----------------------------- Captured stderr call -----------------------------
+DEBUG:custom_components.solar_irrigation:Setting up Solar Irrigation entry
+DEBUG:custom_components.solar_irrigation.progress:[Progress] INFO: Starting Solar Irrigation setup
+DEBUG:custom_components.solar_irrigation.progress:[Status] setup_starting
+------------------------------ Captured log call -------------------------------
+DEBUG    custom_components.solar_irrigation:__init__.py:42 Setting up Solar Irrigation entry
+DEBUG    custom_components.solar_irrigation.progress:progress.py:27 [Progress] INFO: Starting Solar Irrigation setup
+DEBUG    custom_components.solar_irrigation.progress:progress.py:32 [Status] setup_starting
+--------------------------- Captured stderr teardown ---------------------------
+DEBUG:asyncio:Close <_UnixSelectorEventLoop running=False closed=False debug=True>
+---------------------------- Captured log teardown -----------------------------
+DEBUG    asyncio:base_events.py:742 Close <_UnixSelectorEventLoop running=False closed=False debug=True>
+___________________________ test_async_unload_entry ____________________________
+
+hass = <MagicMock id='125129512405712'>
+mock_entry = <MagicMock id='125129512404368'>
+
+    @pytest.mark.asyncio
+    async def test_async_unload_entry(hass: HomeAssistant, mock_entry: ConfigEntry):
+        """Test async_unload_entry function."""
+        # Test successful unload
+>       assert await async_unload_entry(hass, mock_entry) is True
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+tests/test_solar_irrigation.py:41: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ 
+
+hass = <MagicMock id='125129512405712'>
+entry = <MagicMock id='125129512404368'>
+
+    async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+        """Unload a config entry."""
+        _LOGGER.debug("Unloading Solar Irrigation entry")
+        report_progress("Unloading Solar Irrigation entry", "info")
+        update_integration_status("unloading")
+    
+        # Unload platforms
+>       await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+E       TypeError: 'MagicMock' object can't be awaited
+
+custom_components/solar_irrigation/__init__.py:87: TypeError
+---------------------------- Captured stderr setup -----------------------------
+DEBUG:asyncio:Using selector: EpollSelector
+------------------------------ Captured log setup ------------------------------
+DEBUG    asyncio:selector_events.py:64 Using selector: EpollSelector
+----------------------------- Captured stderr call -----------------------------
+DEBUG:custom_components.solar_irrigation:Unloading Solar Irrigation entry
+DEBUG:custom_components.solar_irrigation.progress:[Progress] INFO: Unloading Solar Irrigation entry
+DEBUG:custom_components.solar_irrigation.progress:[Status] unloading
+------------------------------ Captured log call -------------------------------
+DEBUG    custom_components.solar_irrigation:__init__.py:82 Unloading Solar Irrigation entry
+DEBUG    custom_components.solar_irrigation.progress:progress.py:27 [Progress] INFO: Unloading Solar Irrigation entry
+DEBUG    custom_components.solar_irrigation.progress:progress.py:32 [Status] unloading
+--------------------------- Captured stderr teardown ---------------------------
+DEBUG:asyncio:Close <_UnixSelectorEventLoop running=False closed=False debug=True>
+---------------------------- Captured log teardown -----------------------------
+DEBUG    asyncio:base_events.py:742 Close <_UnixSelectorEventLoop running=False closed=False debug=True>
+================================ tests coverage ================================
+_______________ coverage: platform linux, python 3.14.4-final-0 ________________
+
+Name                                                Stmts   Miss Branch BrPart  Cover   Missing
+-----------------------------------------------------------------------------------------------
+custom_components/solar_irrigation/__init__.py         46      6      0      0    87%   30-32, 36-38
+custom_components/solar_irrigation/config_flow.py      13      4      2      0    60%   28-53
+custom_components/solar_irrigation/const.py            43      0      0      0   100%
+custom_components/solar_irrigation/coordinator.py      70     51     12      0    23%   34-105, 109-119
+custom_components/solar_irrigation/irrigation.py       40     40      4      0     0%   3-74
+custom_components/solar_irrigation/models.py           16      3      0      0    81%   22, 44, 61
+custom_components/solar_irrigation/progress.py         41      6      4      1    80%   56, 60-63, 78, 82
+custom_components/solar_irrigation/sensor.py           63     22      2      0    63%   26, 33-36, 41, 46, 51, 56-58, 65, 70, 77, 82, 89, 94, 101, 106, 113, 118, 123
+-----------------------------------------------------------------------------------------------
+TOTAL                                                 332    132     24      1    56%
+FAIL Required test coverage of 85% not reached. Total coverage: 56.46%
+=========================== short test summary info ============================
+FAILED tests/test_solar_irrigation.py::test_async_setup_entry - RuntimeError:...
+FAILED tests/test_solar_irrigation.py::test_async_unload_entry - TypeError: '...
+========================= 2 failed, 13 passed in 5.60s =========================
+make: *** [Makefile:77: test] Error 1

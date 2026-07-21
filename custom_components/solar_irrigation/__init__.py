@@ -1,24 +1,28 @@
-"""Solar Irrigation Integration."""
+"""Solar Irrigation integration."""
 
-import logging
-"""Solar Irrigation Integration."""
+from __future__ import annotations
 
 import logging
 from datetime import datetime
+
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import config_validation as cv
 
-from .const import DOMAIN
+from .const import (
+    CONF_UPDATE_INTERVAL,
+    DEFAULT_UPDATE_INTERVAL,
+    DOMAIN,
+    PLATFORMS,
+)
 from .coordinator import SolarIrrigationCoordinator
 from .progress import report_progress, update_integration_status
+
 
 _LOGGER = logging.getLogger(__name__)
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
-# Define platforms to forward
-PLATFORMS = ["sensor", "switch"]
 
 # Service handlers
 async def async_run_now(hass: HomeAssistant, data):
@@ -40,8 +44,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     update_integration_status("setup_starting")
     
     # Create and register the coordinator
-    coordinator = SolarIrrigationCoordinator(hass, entry.data.get("update_interval", 3600))
-    
+    coordinator = SolarIrrigationCoordinator(
+        hass,
+        entry.data.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
+        entry.entry_id,
+    )    
     # Initialize the coordinator
     await coordinator.async_config_entry_first_refresh()
     

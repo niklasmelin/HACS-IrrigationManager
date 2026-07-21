@@ -16,6 +16,7 @@ COVERAGE_MIN ?= 85
 	check_python_env \
 	check_hassfest_env \
 	test \
+	test-strict \
 	test-unit \
 	test-repository \
 	test-hassfest \
@@ -73,14 +74,23 @@ check_hassfest_env:
 		exit 1; \
 	}
 
-test: check_python_env check_hassfest_env ## Run all tests, require Hassfest, and enforce coverage
+test: check_python_env check_hassfest_env ## Run all tests and report coverage
 	@REQUIRE_HASSFEST=1 \
 	HASSFEST_IMAGE="$(HASSFEST_IMAGE)" \
 	"$(VENV_PYTHON)" -m pytest \
 		--cov=custom_components.solar_irrigation \
-		--cov-branch \
 		--cov-report=term-missing \
-		--cov-fail-under="$(COVERAGE_MIN)" \
+		--cov-branch \
+		-v
+
+test-strict: check_python_env check_hassfest_env ## Run all tests with 85 percent coverage required
+	@REQUIRE_HASSFEST=1 \
+	HASSFEST_IMAGE="$(HASSFEST_IMAGE)" \
+	"$(VENV_PYTHON)" -m pytest \
+		--cov=custom_components.solar_irrigation \
+		--cov-report=term-missing \
+		--cov-branch \
+		--cov-fail-under=85 \
 		-v
 
 test-unit: check_python_env ## Run behavioral tests without repository validators
