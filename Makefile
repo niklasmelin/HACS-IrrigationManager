@@ -1,4 +1,3 @@
-```makefile
 SHELL := /bin/sh
 
 .DEFAULT_GOAL := help
@@ -100,4 +99,3 @@ clean_test_env: ## Remove the Python test environment and caches
 	@rm -rf .pytest_cache
 	@find . -type d -name "__pycache__" -prune -exec rm -rf {} +
 	@echo "Local Python test environment removed."
-```
