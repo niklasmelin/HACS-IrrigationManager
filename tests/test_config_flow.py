@@ -13,7 +13,8 @@ from custom_components.solar_irrigation.const import (
     CONF_RAIN_SENSOR,
     CONF_RAIN_SKIP_THRESHOLD,
     CONF_REMAINING_SENSOR,
-    CONF_SCHEDULE_TIME,
+    CONF_WATERING_WINDOW_END,
+    CONF_WATERING_WINDOW_START,
     CONF_SOLAR_SENSOR,
     CONF_UPDATE_INTERVAL,
     DOMAIN,
@@ -30,7 +31,8 @@ def _valid_input(*, include_rain: bool) -> dict[str, object]:
         CONF_MAX_RUNTIME: 60.0,
         CONF_RAIN_SKIP_THRESHOLD: 5.0,
         CONF_UPDATE_INTERVAL: 3600,
-        CONF_SCHEDULE_TIME: "06:00:00",
+        CONF_WATERING_WINDOW_START: "05:00:00",
+        CONF_WATERING_WINDOW_END: "22:00:00",
     }
     if include_rain:
         data[CONF_RAIN_SENSOR] = "sensor.rain"
@@ -97,3 +99,19 @@ async def test_reject_invalid_rain_unit(hass: HomeAssistant) -> None:
     )
     assert result["type"] is FlowResultType.FORM
     assert result["errors"][CONF_RAIN_SENSOR] == "invalid_unit"
+
+
+async def test_reject_equal_watering_window_times(hass: HomeAssistant) -> None:
+    """Test that a zero-length automatic watering window is rejected."""
+    _set_valid_states(hass, include_rain=False)
+    user_input = _valid_input(include_rain=False)
+    user_input[CONF_WATERING_WINDOW_END] = user_input[CONF_WATERING_WINDOW_START]
+
+    result = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={"source": "user"},
+        data=user_input,
+    )
+
+    assert result["type"] is FlowResultType.FORM
+    assert result["errors"][CONF_WATERING_WINDOW_END] == "invalid_watering_window"

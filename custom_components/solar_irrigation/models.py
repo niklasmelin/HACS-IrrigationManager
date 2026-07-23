@@ -122,6 +122,7 @@ class SolarIrrigationControllerState:
     last_duration_seconds: int = 0
     last_skip_reason: str | None = None
     last_error: str | None = None
+    decision_reason: str | None = None
     last_automatic_date: str | None = None
     delivery_date: str | None = None
     delivered_today_seconds: int = 0
@@ -137,6 +138,7 @@ class SolarIrrigationControllerState:
             "last_duration_seconds": self.last_duration_seconds,
             "last_skip_reason": self.last_skip_reason,
             "last_error": self.last_error,
+            "decision_reason": self.decision_reason,
             "last_automatic_date": self.last_automatic_date,
             "delivery_date": self.delivery_date,
             "delivered_today_seconds": self.delivered_today_seconds,
@@ -154,6 +156,7 @@ class SolarIrrigationControllerState:
             last_duration_seconds=int(data.get("last_duration_seconds", 0)),
             last_skip_reason=data.get("last_skip_reason"),
             last_error=data.get("last_error"),
+            decision_reason=data.get("decision_reason"),
             last_automatic_date=data.get("last_automatic_date"),
             delivery_date=data.get("delivery_date"),
             delivered_today_seconds=int(data.get("delivered_today_seconds", 0)),

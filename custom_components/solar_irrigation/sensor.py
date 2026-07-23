@@ -414,8 +414,15 @@ def _decision_reason(entry: SolarIrrigationConfigEntry) -> str:
     data = entry.runtime_data.coordinator.data
     if controller.state.status is ControllerStatus.IRRIGATING:
         return "irrigation_running"
+    if controller.state.status is ControllerStatus.SLEEPING:
+        return controller.state.decision_reason or "outside_watering_window"
     if controller.state.status is ControllerStatus.ERROR:
-        return "controller_error"
+        return controller.state.decision_reason or "controller_error"
+    if controller.state.decision_reason and controller.state.decision_reason not in {
+        "automatic_window_open",
+        "run_completed",
+    }:
+        return controller.state.decision_reason
     if data.solar_sample_count == 0:
         return "collecting_solar_history"
     if data.skip_reason is not None:
@@ -424,7 +431,7 @@ def _decision_reason(entry: SolarIrrigationConfigEntry) -> str:
         return "daily_budget_exhausted"
     if controller.automatic_decision_made_today():
         return "automatic_decision_completed"
-    return "ready_for_schedule"
+    return "ready_for_automatic_evaluation"
 
 
 def _device_info(entry: ConfigEntry) -> DeviceInfo:

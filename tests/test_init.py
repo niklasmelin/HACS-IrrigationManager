@@ -71,3 +71,35 @@ async def test_setup_forwards_exact_platforms(
         await hass.async_block_till_done()
 
     forward_mock.assert_awaited_once_with(mock_config_entry, PLATFORMS)
+
+
+async def test_migrate_legacy_schedule_to_watering_window(
+    hass: HomeAssistant,
+    config_entry_data: dict[str, object],
+) -> None:
+    """Test migration of the legacy daily time into the 2.3 window start."""
+    from custom_components.solar_irrigation import async_migrate_entry
+    from custom_components.solar_irrigation.const import (
+        CONF_SCHEDULE_TIME,
+        CONF_WATERING_WINDOW_END,
+        CONF_WATERING_WINDOW_START,
+        DEFAULT_WATERING_WINDOW_END,
+    )
+
+    legacy_data = dict(config_entry_data)
+    legacy_data.pop(CONF_WATERING_WINDOW_START)
+    legacy_data.pop(CONF_WATERING_WINDOW_END)
+    legacy_data[CONF_SCHEDULE_TIME] = "06:30:00"
+    entry = MockConfigEntry(
+        domain="solar_irrigation",
+        title="Legacy Irrigation",
+        data=legacy_data,
+        version=1,
+    )
+    entry.add_to_hass(hass)
+
+    assert await async_migrate_entry(hass, entry)
+    assert entry.version == 2
+    assert entry.options[CONF_WATERING_WINDOW_START] == "06:30:00"
+    assert entry.options[CONF_WATERING_WINDOW_END] == DEFAULT_WATERING_WINDOW_END
+    assert CONF_SCHEDULE_TIME not in entry.data

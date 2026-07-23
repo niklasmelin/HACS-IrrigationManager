@@ -116,6 +116,7 @@ class SolarIrrigationController:
             self.state.active_end_at = started + timedelta(seconds=duration_seconds)
             self.state.last_duration_seconds = duration_seconds
             self.state.last_error = None
+            self.state.decision_reason = "irrigation_started"
             self.state.pulse_count_today += 1
             if automatic:
                 self.state.last_automatic_date = dt_util.as_local(started).date().isoformat()
@@ -149,6 +150,7 @@ class SolarIrrigationController:
             self.state.active_started_at = None
             self.state.active_end_at = None
             self.state.last_skip_reason = reason if reason != "completed" else None
+            self.state.decision_reason = "run_completed" if reason == "completed" else reason
             await self._async_save()
 
     async def async_record_skip(self, reason: str, *, automatic: bool) -> None:
@@ -158,6 +160,7 @@ class SolarIrrigationController:
         self.state.last_execution = now
         self.state.last_skip_reason = reason
         self.state.last_duration_seconds = 0
+        self.state.decision_reason = reason
         if automatic:
             self.state.last_automatic_date = dt_util.as_local(now).date().isoformat()
         await self._async_save()
@@ -165,6 +168,33 @@ class SolarIrrigationController:
     def automatic_decision_made_today(self) -> bool:
         """Return whether today's scheduled automatic decision is already stored."""
         return self.state.last_automatic_date == dt_util.now().date().isoformat()
+
+
+    async def async_set_status(
+        self,
+        status: ControllerStatus,
+        *,
+        decision_reason: str | None = None,
+    ) -> None:
+        """Persist an externally determined controller status when it changes.
+
+        Scheduling owns states such as ``sleeping`` and ``monitoring`` while the
+        controller owns execution states such as ``irrigating`` and ``error``.
+        This method provides a small, serialized boundary between those parts
+        and avoids unnecessary storage writes when neither visible value changed.
+        Active irrigation is never overwritten by a background scheduler tick.
+        """
+        async with self._lock:
+            if self.is_running or self.state.status is ControllerStatus.IRRIGATING:
+                return
+            if (
+                self.state.status is status
+                and self.state.decision_reason == decision_reason
+            ):
+                return
+            self.state.status = status
+            self.state.decision_reason = decision_reason
+            await self._async_save()
 
     async def async_shutdown(self) -> None:
         """Cancel timers and leave an active irrigation entity safely off."""

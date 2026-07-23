@@ -1,8 +1,8 @@
-# Solar Irrigation 2.2
+# Solar Irrigation 2.3
 
 Solar Irrigation is a Home Assistant custom integration for conservative, weather-dependent garden irrigation. It estimates the total water demand for the current local calendar day from actual and forecast solar production, reduces demand when rain is measured, and exposes the internal calculation so the system can be tuned safely.
 
-Version 2.2 introduces the foundation for pulse-and-soak irrigation: a rolling two-hour history of actual solar production, a daily water budget that resets at midnight, a user-adjustable **Peak daily water demand**, and clearer controller observability. Automatic delivery is still bounded by the calculated daily budget; manual service calls remain explicit operator actions.
+Version 2.3 replaces the legacy single **Daily irrigation time** with a configurable **Automatic watering window**. The controller evaluates automatic irrigation every 15 minutes, reports `sleeping` outside that window, and cannot start automatic irrigation at night unless the user deliberately configures an overnight window. The rolling two-hour solar history, daily budget, persistent delivery counters, and writable **Peak daily water demand** remain the basis for pulse-and-soak development.
 
 ## Design goals
 
@@ -84,9 +84,21 @@ The amount of measured rain that reduces the automatic daily water budget to zer
 
 The requested coordinator refresh period in seconds. Solar Irrigation samples the cumulative solar sensor at least every 15 minutes, so a longer configured interval is internally limited to 15 minutes for solar-history collection. Shorter coordinator updates do not create excessive samples: a new delta is accepted only after the minimum sampling interval has elapsed.
 
-### Daily irrigation time
+### Automatic watering window start
 
-The legacy scheduled automatic decision time. In the current 2.2 foundation this remains the point at which the automatic calculated runtime can be started. The rolling history and budget model are designed for the following multi-pulse scheduler, where the daily budget will be distributed across multiple watering and soak periods.
+The earliest local time at which automatic irrigation is permitted. The default is `05:00:00`. The 15-minute evaluator may therefore make its first automatic decision at the first evaluation on or after this time. Manual `run_now` service calls are not restricted by the window.
+
+### Automatic watering window end
+
+The local time at which new automatic irrigation becomes blocked. The default is `22:00:00`. The end is exclusive: with a `05:00-22:00` window, an evaluation at exactly 22:00 enters `sleeping` and does not start a run. An irrigation run that began before the window closed is allowed to finish safely.
+
+Both normal daytime windows and windows that cross midnight are supported. For example, `22:00-05:00` is an overnight window. Equal start and end times are rejected because they are ambiguous and would not provide a safe sleep period.
+
+### Automatic evaluation interval
+
+The automatic scheduler evaluates every 15 minutes. Each evaluation first checks the local watering window. Outside the window it updates controller status to `sleeping` with decision reason `outside_watering_window`. Inside the window it reports `monitoring`, refreshes source data when an automatic decision is eligible, and applies the daily-decision guard.
+
+Version 2.3 retains the existing one-automatic-decision-per-day execution behavior while moving the timer architecture to periodic evaluation. This avoids an unexpected change in delivered water before the full multi-pulse allocator is implemented, while establishing the correct time-window and sleep-state foundation.
 
 ## Daily budget algorithm
 
@@ -147,7 +159,7 @@ The integration calculates and exposes:
 - weighted rolling rate: 70% last-hour rate and 30% two-hour rate;
 - sample count and full timestamped history.
 
-The rolling signal is intentionally observational in 2.2. It provides the data required to tune the next pulse-and-soak scheduler without introducing opaque rapid-change heuristics.
+The rolling signal is intentionally observational in 2.3. It provides the data required to tune the next pulse-and-soak scheduler without introducing opaque rapid-change heuristics.
 
 ## Daily reset and persistence
 
@@ -163,7 +175,7 @@ The reset is also checked during startup, making it safe when Home Assistant was
 
 ## Controller states and observability
 
-The controller status describes what the controller is doing now rather than leaving it permanently in a historical `completed` state. Version 2.2 defines meaningful states including:
+The controller status describes what the controller is doing now rather than leaving it permanently in a historical `completed` state. Version 2.3 defines meaningful states including:
 
 - `initializing`
 - `waiting_for_history`
@@ -203,13 +215,17 @@ Manual runs are deliberate overrides. They are measured and visible in controlle
 
 Stops an active run, turns off or closes the configured irrigation entity, records actual elapsed delivery, and returns the controller to the monitoring state.
 
-## Upgrade notes for 2.2
+## Upgrade notes for 2.3
 
-- The manifest version is `2.2`.
-- Existing `max_runtime` config data is retained as the storage key for compatibility but is presented as **Peak daily water demand**.
-- Persisted legacy status values are mapped to the new state model.
-- Peak daily water demand is exposed as a writable number entity with a range of 10–240 minutes.
-- Existing values outside this range should be corrected through the entity after upgrade.
+- The manifest version is `2.3`.
+- `Daily irrigation time` is removed from new and updated configuration forms.
+- Existing `schedule_time` data is migrated automatically to **Automatic watering window start**. This preserves the previous earliest automatic run time.
+- **Automatic watering window end** defaults to `22:00:00` during migration.
+- Config-entry schema version is increased to `2`.
+- Automatic evaluation runs every 15 minutes and is blocked outside the configured window.
+- Controller status becomes `sleeping` at night and `monitoring` while the window is open.
+- Manual `run_now` and `stop` services remain available outside the automatic window.
+- Daily delivered-water counters and budget reset behavior remain tied to Home Assistant local calendar days.
 
 ## Development and validation
 

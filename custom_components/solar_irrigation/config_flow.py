@@ -20,12 +20,15 @@ from .const import (
     CONF_RAIN_SKIP_THRESHOLD,
     CONF_REMAINING_SENSOR,
     CONF_SCHEDULE_TIME,
+    CONF_WATERING_WINDOW_END,
+    CONF_WATERING_WINDOW_START,
     CONF_SOLAR_SENSOR,
     CONF_UPDATE_INTERVAL,
     DEFAULT_MAX_RUNTIME,
     DEFAULT_MAX_SOLAR,
     DEFAULT_RAIN_SKIP_THRESHOLD,
-    DEFAULT_SCHEDULE_TIME,
+    DEFAULT_WATERING_WINDOW_END,
+    DEFAULT_WATERING_WINDOW_START,
     DEFAULT_UPDATE_INTERVAL,
     DOMAIN,
     MAX_MAX_RUNTIME,
@@ -44,7 +47,7 @@ from .const import (
 class SolarIrrigationConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle initial configuration for Solar Irrigation."""
 
-    VERSION = 1
+    VERSION = 2
 
     async def async_step_user(
         self,
@@ -184,6 +187,8 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ),
             vol.Required(
                 CONF_SCHEDULE_TIME,
+    CONF_WATERING_WINDOW_END,
+    CONF_WATERING_WINDOW_START,
                 default=values.get(CONF_SCHEDULE_TIME, DEFAULT_SCHEDULE_TIME),
             ): selector.TimeSelector(),
         }
@@ -223,6 +228,7 @@ def _validate_input(hass: HomeAssistant, user_input: dict[str, Any]) -> dict[str
         _validate_positive(user_input.get(key), key, errors)
     _validate_non_negative(user_input.get(CONF_MAX_RUNTIME), CONF_MAX_RUNTIME, errors)
     _validate_positive(user_input.get(CONF_UPDATE_INTERVAL), CONF_UPDATE_INTERVAL, errors)
+    _validate_watering_window(user_input, errors)
     return errors
 
 
@@ -273,3 +279,20 @@ def _validate_non_negative(value: Any, field: str, errors: dict[str, str]) -> No
         return
     if not math.isfinite(number) or number < 0:
         errors[field] = "invalid_value"
+
+
+def _validate_watering_window(
+    user_input: dict[str, Any],
+    errors: dict[str, str],
+) -> None:
+    """Validate that automatic watering has a non-empty daily time window.
+
+    Both daytime and overnight windows are valid. Equal values would represent
+    either a zero-length or ambiguous 24-hour window, so they are rejected.
+    """
+    start = user_input.get(CONF_WATERING_WINDOW_START)
+    end = user_input.get(CONF_WATERING_WINDOW_END)
+    if start is None or end is None:
+        return
+    if str(start) == str(end):
+        errors[CONF_WATERING_WINDOW_END] = "invalid_watering_window"

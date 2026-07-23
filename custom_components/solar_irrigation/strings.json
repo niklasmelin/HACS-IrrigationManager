@@ -4,7 +4,7 @@
     "step": {
       "user": {
         "title": "Configure Solar Irrigation",
-        "description": "Configure solar production, the irrigation entity, and optional rain adjustment.",
+        "description": "Configure source entities, water-demand calibration, rain handling, and the automatic watering window.",
         "data": {
           "solar_sensor": "Solar energy produced sensor",
           "remaining_sensor": "Remaining solar forecast sensor",
@@ -14,12 +14,13 @@
           "max_runtime": "Initial peak daily water demand",
           "rain_skip_threshold": "Rain amount that skips irrigation",
           "update_interval": "Calculation update interval",
-          "schedule_time": "Daily irrigation time"
+          "watering_window_start": "Automatic watering window start",
+          "watering_window_end": "Automatic watering window end"
         }
       },
       "init": {
         "title": "Update Solar Irrigation options",
-        "description": "Change source entities, calculation limits, rain handling, or schedule.",
+        "description": "Configure source entities, water-demand calibration, rain handling, and the automatic watering window.",
         "data": {
           "solar_sensor": "Solar energy produced sensor",
           "remaining_sensor": "Remaining solar forecast sensor",
@@ -29,7 +30,8 @@
           "max_runtime": "Initial peak daily water demand",
           "rain_skip_threshold": "Rain amount that skips irrigation",
           "update_interval": "Calculation update interval",
-          "schedule_time": "Daily irrigation time"
+          "watering_window_start": "Automatic watering window start",
+          "watering_window_end": "Automatic watering window end"
         }
       }
     },
@@ -38,7 +40,8 @@
       "unavailable": "The selected sensor is unavailable.",
       "not_numeric": "The selected sensor does not have a numeric state.",
       "invalid_unit": "The selected sensor uses an unsupported unit.",
-      "invalid_value": "The value must be finite and within the supported range."
+      "invalid_value": "The value must be finite and within the supported range.",
+      "invalid_watering_window": "The watering window start and end times must be different."
     },
     "abort": {
       "already_configured": "This irrigation entity is already configured."
@@ -48,7 +51,7 @@
     "step": {
       "init": {
         "title": "Update Solar Irrigation options",
-        "description": "Change source entities, calculation limits, rain handling, or schedule.",
+        "description": "Configure source entities, water-demand calibration, rain handling, and the automatic watering window.",
         "data": {
           "solar_sensor": "Solar energy produced sensor",
           "remaining_sensor": "Remaining solar forecast sensor",
@@ -58,7 +61,8 @@
           "max_runtime": "Initial peak daily water demand",
           "rain_skip_threshold": "Rain amount that skips irrigation",
           "update_interval": "Calculation update interval",
-          "schedule_time": "Daily irrigation time"
+          "watering_window_start": "Automatic watering window start",
+          "watering_window_end": "Automatic watering window end"
         }
       }
     },
@@ -67,7 +71,8 @@
       "unavailable": "The selected sensor is unavailable.",
       "not_numeric": "The selected sensor does not have a numeric state.",
       "invalid_unit": "The selected sensor uses an unsupported unit.",
-      "invalid_value": "The value must be finite and within the supported range."
+      "invalid_value": "The value must be finite and within the supported range.",
+      "invalid_watering_window": "The watering window start and end times must be different."
     }
   },
   "entity": {
@@ -96,10 +101,15 @@
       "irrigation_status": {
         "name": "Irrigation controller status",
         "state": {
-          "idle": "Idle",
-          "scheduled": "Scheduled",
-          "running": "Running",
-          "completed": "Completed",
+          "initializing": "Initializing",
+          "waiting_for_history": "Waiting for solar history",
+          "sleeping": "Sleeping",
+          "monitoring": "Monitoring",
+          "waiting_for_pulse": "Waiting for pulse",
+          "soaking": "Soaking",
+          "irrigating": "Irrigating",
+          "rain_paused": "Paused by rain",
+          "daily_budget_reached": "Daily budget reached",
           "error": "Error"
         }
       },
