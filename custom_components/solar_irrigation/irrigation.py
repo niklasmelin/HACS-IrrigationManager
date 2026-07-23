@@ -24,6 +24,10 @@ from .const import (
     DEFAULT_MAX_PULSE_DURATION,
     DEFAULT_MAX_RUNTIME,
     DEFAULT_SOAK_DURATION,
+    MAX_MAX_PULSE_DURATION,
+    MAX_SOAK_DURATION,
+    MIN_MAX_PULSE_DURATION,
+    MIN_SOAK_DURATION,
     MINUTES_TO_SECONDS,
     STORAGE_KEY_TEMPLATE,
     STORAGE_VERSION,
@@ -907,6 +911,8 @@ class SolarIrrigationController:
                 DEFAULT_MAX_PULSE_DURATION,
             )
         )
+        minutes = max(MIN_MAX_PULSE_DURATION, min(MAX_MAX_PULSE_DURATION, minutes))
+        minutes = max(MIN_SOAK_DURATION, min(MAX_SOAK_DURATION, minutes))
         return max(1, round(minutes * MINUTES_TO_SECONDS))
 
     @property

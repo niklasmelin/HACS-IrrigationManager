@@ -212,7 +212,7 @@ async def test_migrate_legacy_schedule_to_watering_window(
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry)
-    assert entry.version == 3
+    assert entry.version == 4
     assert entry.options[CONF_WATERING_WINDOW_START] == "06:30:00"
     assert entry.options[CONF_WATERING_WINDOW_END] == DEFAULT_WATERING_WINDOW_END
     assert CONF_SCHEDULE_TIME not in entry.data
@@ -246,7 +246,7 @@ async def test_migrate_clamps_legacy_peak_demand_and_adds_pulse_defaults(
     entry.add_to_hass(hass)
 
     assert await async_migrate_entry(hass, entry)
-    assert entry.version == 3
+    assert entry.version == 4
     assert entry.options[CONF_MAX_RUNTIME] == MIN_MAX_RUNTIME
     assert entry.options[CONF_MAX_PULSE_DURATION] == DEFAULT_MAX_PULSE_DURATION
     assert entry.options[CONF_SOAK_DURATION] == DEFAULT_SOAK_DURATION

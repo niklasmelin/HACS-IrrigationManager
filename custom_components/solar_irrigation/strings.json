@@ -163,6 +163,12 @@
     "number": {
       "peak_daily_water_demand": {
         "name": "Peak daily water demand"
+      },
+      "maximum_pulse_duration": {
+        "name": "Maximum pulse duration"
+      },
+      "soak_duration": {
+        "name": "Soak duration"
       }
     }
   },

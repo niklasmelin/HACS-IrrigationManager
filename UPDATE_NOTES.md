@@ -1,3 +1,14 @@
+# Update notes
+
+## Version 2.6.0
+
+- Adds writable **Maximum pulse duration** and **Soak duration** number entities.
+- Maximum pulse duration: 0.5-15 minutes, 0.5-minute steps, default 3 minutes.
+- Soak duration: 1-30 minutes, one-minute steps, default 15 minutes.
+- Changes are persisted without reloading the integration.
+- A running pulse or soak is not altered; the new setting applies to the next stage.
+- Existing values outside the new limits are clamped when read or changed.
+
 # Solar Irrigation 2.5
 
 - Implements serialized pulse-and-soak watering events.

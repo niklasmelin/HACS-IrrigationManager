@@ -34,9 +34,13 @@ from .const import (
     DEFAULT_WATERING_WINDOW_END,
     DEFAULT_WATERING_WINDOW_START,
     DOMAIN,
+    MAX_MAX_PULSE_DURATION,
     MAX_MAX_RUNTIME,
+    MAX_SOAK_DURATION,
     MIN_AUTOMATIC_EVENT_SECONDS,
+    MIN_MAX_PULSE_DURATION,
     MIN_MAX_RUNTIME,
+    MIN_SOAK_DURATION,
     PLATFORMS,
     SVC_RUN_NOW,
     SVC_STOP,
@@ -169,11 +173,36 @@ async def async_migrate_entry(
     except (TypeError, ValueError):
         peak_demand = DEFAULT_MAX_RUNTIME
     options[CONF_MAX_RUNTIME] = max(
-        MIN_MAX_RUNTIME,
+        MIN_MAX_PULSE_DURATION,
+    MIN_MAX_RUNTIME,
+    MIN_SOAK_DURATION,
         min(MAX_MAX_RUNTIME, peak_demand),
     )
-    options.setdefault(CONF_MAX_PULSE_DURATION, DEFAULT_MAX_PULSE_DURATION)
-    options.setdefault(CONF_SOAK_DURATION, DEFAULT_SOAK_DURATION)
+    raw_pulse = options.get(
+        CONF_MAX_PULSE_DURATION,
+        data.get(CONF_MAX_PULSE_DURATION, DEFAULT_MAX_PULSE_DURATION),
+    )
+    try:
+        max_pulse_duration = float(raw_pulse)
+    except (TypeError, ValueError):
+        max_pulse_duration = DEFAULT_MAX_PULSE_DURATION
+    options[CONF_MAX_PULSE_DURATION] = max(
+        MIN_MAX_PULSE_DURATION,
+        min(MAX_MAX_PULSE_DURATION, max_pulse_duration),
+    )
+
+    raw_soak = options.get(
+        CONF_SOAK_DURATION,
+        data.get(CONF_SOAK_DURATION, DEFAULT_SOAK_DURATION),
+    )
+    try:
+        soak_duration = float(raw_soak)
+    except (TypeError, ValueError):
+        soak_duration = DEFAULT_SOAK_DURATION
+    options[CONF_SOAK_DURATION] = max(
+        MIN_SOAK_DURATION,
+        min(MAX_SOAK_DURATION, soak_duration),
+    )
 
     irrigation_entity = str(
         options.get(
@@ -206,10 +235,10 @@ async def async_migrate_entry(
         data=data,
         options=options,
         unique_id=irrigation_entity or entry.unique_id,
-        version=3,
+        version=4,
     )
     _LOGGER.info(
-        "Migrated Solar Irrigation entry %s to schema version 3",
+        "Migrated Solar Irrigation entry %s to schema version 4",
         entry.entry_id,
     )
     return True

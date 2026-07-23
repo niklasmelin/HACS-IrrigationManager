@@ -6,7 +6,7 @@ forecast solar production remaining for the day, optional rain, and a seasonal
 water-demand setting. The resulting daily pump-runtime budget is delivered as
 short watering pulses separated by soak periods.
 
-Version **2.5.2** implements the complete pulse-and-soak controller, shared daily
+Version **2.6.0** implements the complete pulse-and-soak controller, shared daily
 budget accounting for automatic and manual watering, physical pump-state
 confirmation, immediate controller observability, and config-entry selectors for
 manual actions.
@@ -293,23 +293,30 @@ event. An automatic event rechecks the new budget before its next pulse.
 The rain amount at which the automatic rain factor reaches zero. Half the
 threshold produces approximately a 50 percent rain factor.
 
-### Maximum continuous watering pulse
+### Maximum pulse duration
 
+- Writable `number` entity
 - Unit: minutes
-- Range: 1 to 30
+- Range: 0.5 to 15
+- Step: 0.5
 - Default: 3
 
-The longest continuous pump-on period within one event. Smaller values reduce
-runoff and improve absorption in dry pots or beds.
+The longest continuous pump-on period within one event. It can be adjusted from
+a dashboard or automation without reloading the integration. A pulse already in
+progress keeps its planned duration; the new value applies to the next pulse.
 
-### Soak time between pulses
+### Soak duration
 
+- Writable `number` entity
 - Unit: minutes
-- Range: 1 to 120
+- Range: 1 to 30
+- Step: 1
 - Default: 15
 
-The pump-off interval after each non-final pulse. During this time the controller
-reports **Soaking** and no other event can start.
+The pump-off interval after each non-final pulse. It can be adjusted without an
+integration reload. A soak already in progress keeps its scheduled deadline; the
+new value applies to the next soak. During soaking the controller reports
+**Soaking** and no other event can start.
 
 ### Calculation update interval
 
@@ -470,6 +477,16 @@ physical actuator state machine, run-soak sequencing, budget enforcement,
 configuration validation, delayed solar samples, restart recovery, immediate
 observability, diagnostics, and Home Assistant action behavior.
 
+
+
+### 2.6.0 live pulse tuning
+
+Version 2.6 exposes **Maximum pulse duration** and **Soak duration** as writable
+Home Assistant number entities. Values are persisted per config entry and are
+refreshed without reloading the integration. Maximum pulse duration supports
+0.5-15 minutes in 0.5-minute steps; soak duration supports 1-30 minutes in
+one-minute steps. Active stages are not rescheduled: changes apply to the next
+pulse or soak.
 
 ### 2.5.2 test and race-condition hotfix
 

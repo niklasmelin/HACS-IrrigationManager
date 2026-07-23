@@ -56,7 +56,7 @@ from .watering_window import entry_value
 class SolarIrrigationConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle initial configuration for Solar Irrigation."""
 
-    VERSION = 3
+    VERSION = 4
 
     async def async_step_user(
         self,
@@ -236,7 +236,7 @@ def _schema(
                 selector.NumberSelectorConfig(
                     min=MIN_MAX_PULSE_DURATION,
                     max=MAX_MAX_PULSE_DURATION,
-                    step=1,
+                    step=0.5,
                     unit_of_measurement="min",
                     mode=selector.NumberSelectorMode.BOX,
                 )
