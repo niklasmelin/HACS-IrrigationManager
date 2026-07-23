@@ -131,9 +131,6 @@
       "solar_rolling_rate": {
         "name": "Solar rolling rate"
       },
-      "solar_sample_count": {
-        "name": "Solar sample count"
-      },
       "solar_history": {
         "name": "Solar history"
       },

@@ -146,12 +146,6 @@ SOLAR_HISTORY_DESCRIPTIONS: tuple[SolarIrrigationSensorDescription, ...] = (
         suggested_display_precision=3,
         value_fn=lambda data: data.solar_rolling_rate_kwh_per_hour,
     ),
-    SolarIrrigationSensorDescription(
-        key="solar_sample_count",
-        translation_key="solar_sample_count",
-        entity_category=EntityCategory.DIAGNOSTIC,
-        value_fn=lambda data: data.solar_sample_count,
-    ),
 )
 
 RAIN_DESCRIPTION = SolarIrrigationSensorDescription(

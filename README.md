@@ -1,8 +1,8 @@
-# Solar Irrigation 2.3
+# Solar Irrigation 2.4
 
 Solar Irrigation is a Home Assistant custom integration for conservative, weather-dependent garden irrigation. It estimates the total water demand for the current local calendar day from actual and forecast solar production, reduces demand when rain is measured, and exposes the internal calculation so the system can be tuned safely.
 
-Version 2.3 replaces the legacy single **Daily irrigation time** with a configurable **Automatic watering window**. The controller evaluates automatic irrigation every 15 minutes, reports `sleeping` outside that window, and cannot start automatic irrigation at night unless the user deliberately configures an overnight window. The rolling two-hour solar history, daily budget, persistent delivery counters, and writable **Peak daily water demand** remain the basis for pulse-and-soak development.
+Version 2.4 uses a configurable **Automatic watering window** instead of the legacy single **Daily irrigation time**. The controller evaluates automatic irrigation every 15 minutes, reports `sleeping` outside that window, and cannot start automatic irrigation at night unless the user deliberately configures an overnight window. The rolling two-hour solar history, daily budget, persistent delivery counters, and writable **Peak daily water demand** remain the basis for pulse-and-soak development.
 
 ## Design goals
 
@@ -98,7 +98,7 @@ Both normal daytime windows and windows that cross midnight are supported. For e
 
 The automatic scheduler evaluates every 15 minutes. Each evaluation first checks the local watering window. Outside the window it updates controller status to `sleeping` with decision reason `outside_watering_window`. Inside the window it reports `monitoring`, refreshes source data when an automatic decision is eligible, and applies the daily-decision guard.
 
-Version 2.3 retains the existing one-automatic-decision-per-day execution behavior while moving the timer architecture to periodic evaluation. This avoids an unexpected change in delivered water before the full multi-pulse allocator is implemented, while establishing the correct time-window and sleep-state foundation.
+Version 2.4 retains the existing one-automatic-decision-per-day execution behavior while moving the timer architecture to periodic evaluation. This avoids an unexpected change in delivered water before the full multi-pulse allocator is implemented, while establishing the correct time-window and sleep-state foundation.
 
 ## Daily budget algorithm
 
@@ -159,7 +159,7 @@ The integration calculates and exposes:
 - weighted rolling rate: 70% last-hour rate and 30% two-hour rate;
 - sample count and full timestamped history.
 
-The rolling signal is intentionally observational in 2.3. It provides the data required to tune the next pulse-and-soak scheduler without introducing opaque rapid-change heuristics.
+The rolling signal is intentionally observational in 2.4. It provides the data required to tune the next pulse-and-soak scheduler without introducing opaque rapid-change heuristics.
 
 ## Daily reset and persistence
 
@@ -175,7 +175,7 @@ The reset is also checked during startup, making it safe when Home Assistant was
 
 ## Controller states and observability
 
-The controller status describes what the controller is doing now rather than leaving it permanently in a historical `completed` state. Version 2.3 defines meaningful states including:
+The controller status describes what the controller is doing now rather than leaving it permanently in a historical `completed` state. Version 2.4 defines meaningful states including:
 
 - `initializing`
 - `waiting_for_history`
@@ -215,9 +215,12 @@ Manual runs are deliberate overrides. They are measured and visible in controlle
 
 Stops an active run, turns off or closes the configured irrigation entity, records actual elapsed delivery, and returns the controller to the monitoring state.
 
-## Upgrade notes for 2.3
+## Upgrade notes for 2.4
 
-- The manifest version is `2.3`.
+- The separate **Solar sample count** entity has been removed because the **Solar history** entity already exposes the accepted sample count as its state.
+- The complete rolling sample list remains available in the **Solar history** entity attributes and in downloaded diagnostics.
+
+- The manifest version is `2.4`.
 - `Daily irrigation time` is removed from new and updated configuration forms.
 - Existing `schedule_time` data is migrated automatically to **Automatic watering window start**. This preserves the previous earliest automatic run time.
 - **Automatic watering window end** defaults to `22:00:00` during migration.
