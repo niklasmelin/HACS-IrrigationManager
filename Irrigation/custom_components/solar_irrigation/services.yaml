@@ -1,0 +1,37 @@
+run_now:
+  name: Run irrigation now
+  description: Start irrigation using the calculated runtime or an optional override.
+  fields:
+    entry_id:
+      name: Configuration entry
+      description: Entry ID of the Solar Irrigation configuration to run.
+      required: true
+      selector:
+        text:
+    duration:
+      name: Duration
+      description: Optional runtime override in minutes.
+      required: false
+      selector:
+        number:
+          min: 0
+          max: 1440
+          step: 1
+          unit_of_measurement: min
+    ignore_rain:
+      name: Ignore rain
+      description: Allow a manual run even when the rain threshold is reached.
+      required: false
+      default: false
+      selector:
+        boolean:
+stop:
+  name: Stop irrigation
+  description: Stop the active irrigation run for one configuration entry.
+  fields:
+    entry_id:
+      name: Configuration entry
+      description: Entry ID of the Solar Irrigation configuration to stop.
+      required: true
+      selector:
+        text:
