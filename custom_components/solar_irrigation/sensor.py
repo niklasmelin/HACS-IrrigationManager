@@ -1,4 +1,4 @@
-"""Diagnostic sensor entities for Solar Irrigation."""
+"""Calculation, history, controller, and observability sensors."""
 
 from __future__ import annotations
 
@@ -14,25 +14,34 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
-    EntityCategory,
     PERCENTAGE,
+    EntityCategory,
     UnitOfEnergy,
     UnitOfLength,
     UnitOfTime,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import CONF_RAIN_SENSOR, DOMAIN, ControllerStatus
+from .const import (
+    CONF_MAX_PULSE_DURATION,
+    CONF_RAIN_SENSOR,
+    CONF_SOAK_DURATION,
+    DEFAULT_MAX_PULSE_DURATION,
+    DEFAULT_SOAK_DURATION,
+    DOMAIN,
+    ControllerStatus,
+)
 from .coordinator import SolarIrrigationCoordinator
 from .models import SolarIrrigationConfigEntry, SolarIrrigationData
+from .watering_window import entry_value
 
 
 @dataclass(frozen=True, kw_only=True)
 class SolarIrrigationSensorDescription(SensorEntityDescription):
-    """Describe how a coordinator field is exposed as a sensor."""
+    """Describe how one coordinator field is exposed as a sensor."""
 
     value_fn: Callable[[SolarIrrigationData], Any]
 
@@ -43,7 +52,7 @@ SENSOR_DESCRIPTIONS: tuple[SolarIrrigationSensorDescription, ...] = (
         translation_key="actual_solar",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL,
+        state_class=SensorStateClass.TOTAL_INCREASING,
         value_fn=lambda data: data.actual_solar_kwh,
     ),
     SolarIrrigationSensorDescription(
@@ -51,7 +60,7 @@ SENSOR_DESCRIPTIONS: tuple[SolarIrrigationSensorDescription, ...] = (
         translation_key="remaining_solar",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL,
+        state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda data: data.remaining_solar_kwh,
     ),
     SolarIrrigationSensorDescription(
@@ -59,7 +68,7 @@ SENSOR_DESCRIPTIONS: tuple[SolarIrrigationSensorDescription, ...] = (
         translation_key="expected_solar_today",
         native_unit_of_measurement=UnitOfEnergy.KILO_WATT_HOUR,
         device_class=SensorDeviceClass.ENERGY,
-        state_class=SensorStateClass.TOTAL,
+        state_class=SensorStateClass.MEASUREMENT,
         value_fn=lambda data: data.expected_solar_kwh,
     ),
     SolarIrrigationSensorDescription(
@@ -163,10 +172,10 @@ async def async_setup_entry(
     entry: SolarIrrigationConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Create coordinator-backed sensors for one config entry."""
+    """Create coordinator and controller-backed sensors for one entry."""
     del hass
     descriptions = [*SENSOR_DESCRIPTIONS, *SOLAR_HISTORY_DESCRIPTIONS]
-    if entry.options.get(CONF_RAIN_SENSOR, entry.data.get(CONF_RAIN_SENSOR)):
+    if entry_value(entry, CONF_RAIN_SENSOR, None):
         descriptions.append(RAIN_DESCRIPTION)
     async_add_entities(
         SolarIrrigationSensor(entry, description) for description in descriptions
@@ -198,7 +207,7 @@ class SolarIrrigationSensor(
         entry: SolarIrrigationConfigEntry,
         description: SolarIrrigationSensorDescription,
     ) -> None:
-        """Initialize a sensor with stable identity and shared device metadata."""
+        """Initialize a sensor with stable identity and device metadata."""
         super().__init__(entry.runtime_data.coordinator)
         self.entry = entry
         self.entity_description = description
@@ -207,21 +216,50 @@ class SolarIrrigationSensor(
 
     @property
     def native_value(self) -> Any:
-        """Return the current native sensor value."""
+        """Return the current native coordinator value."""
         return self.entity_description.value_fn(self.coordinator.data)
 
 
-class SolarIrrigationStatusSensor(SensorEntity):
-    """Expose controller status and recent execution details."""
+class _ControllerCoordinatorSensor(
+    CoordinatorEntity[SolarIrrigationCoordinator],
+    SensorEntity,
+):
+    """Base entity updated by both coordinator refreshes and controller pushes."""
 
     _attr_has_entity_name = True
+
+    def __init__(self, entry: SolarIrrigationConfigEntry, key: str) -> None:
+        """Initialize shared coordinator, controller, identity, and device data."""
+        super().__init__(entry.runtime_data.coordinator)
+        self.entry = entry
+        self._attr_unique_id = f"{entry.entry_id}_{key}"
+        self._attr_device_info = _device_info(entry)
+
+    async def async_added_to_hass(self) -> None:
+        """Subscribe to controller transitions after the entity is registered."""
+        await super().async_added_to_hass()
+        self.async_on_remove(
+            self.entry.runtime_data.controller.async_add_listener(
+                self._handle_controller_update
+            )
+        )
+
+    @callback
+    def _handle_controller_update(self) -> None:
+        """Write state immediately after a controller transition."""
+        self.async_write_ha_state()
+
+
+class SolarIrrigationStatusSensor(_ControllerCoordinatorSensor):
+    """Expose the current controller mode and detailed event state."""
+
     _attr_translation_key = "irrigation_status"
+    _attr_device_class = SensorDeviceClass.ENUM
+    _attr_options = [status.value for status in ControllerStatus]
 
     def __init__(self, entry: SolarIrrigationConfigEntry) -> None:
         """Initialize the controller-status sensor."""
-        self.entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_irrigation_status"
-        self._attr_device_info = _device_info(entry)
+        super().__init__(entry, "irrigation_status")
 
     @property
     def native_value(self) -> str:
@@ -230,8 +268,8 @@ class SolarIrrigationStatusSensor(SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return execution, water-budget, and solar-observation details."""
-        data = self.entry.runtime_data.coordinator.data
+        """Return event, water-budget, error, and solar-observation details."""
+        data = self.coordinator.data
         controller = self.entry.runtime_data.controller
         attributes = controller.state.as_dict()
         attributes.update(
@@ -240,9 +278,27 @@ class SolarIrrigationStatusSensor(SensorEntity):
                 "delivered_today_minutes": round(
                     controller.delivered_today_seconds() / 60, 3
                 ),
-                "remaining_today_minutes": _remaining_budget(entry=self.entry),
+                "remaining_today_minutes": _remaining_budget(self.entry),
                 "pulse_count_today": controller.pulse_count_today(),
                 "decision_reason": _decision_reason(self.entry),
+                "decision_code": controller.state.decision_reason,
+                "error_message": controller.state.last_error,
+                "actuator_state": controller.actuator_state,
+                "actuator_is_active": controller.actuator_is_active,
+                "maximum_pulse_minutes": float(
+                    entry_value(
+                        self.entry,
+                        CONF_MAX_PULSE_DURATION,
+                        DEFAULT_MAX_PULSE_DURATION,
+                    )
+                ),
+                "soak_minutes": float(
+                    entry_value(
+                        self.entry,
+                        CONF_SOAK_DURATION,
+                        DEFAULT_SOAK_DURATION,
+                    )
+                ),
                 "solar_energy_last_hour_kwh": data.solar_energy_last_hour_kwh,
                 "solar_energy_last_2_hours_kwh": data.solar_energy_last_2_hours_kwh,
                 "solar_rolling_rate_kwh_per_hour": (
@@ -279,21 +335,14 @@ class SolarHistorySensor(CoordinatorEntity[SolarIrrigationCoordinator], SensorEn
         return self.coordinator.solar_history_as_dict()
 
 
-class _ControllerMetricSensor(SensorEntity):
-    """Base class for sensors combining coordinator and controller state."""
+class _ControllerMetricSensor(_ControllerCoordinatorSensor):
+    """Base class for diagnostic sensors combining calculation and execution."""
 
-    _attr_has_entity_name = True
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-
-    def __init__(self, entry: SolarIrrigationConfigEntry, key: str) -> None:
-        """Initialize a stable controller metric entity."""
-        self.entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_{key}"
-        self._attr_device_info = _device_info(entry)
 
 
 class DailyBudgetSensor(_ControllerMetricSensor):
-    """Expose today's calculated total irrigation budget."""
+    """Expose the current calculated total irrigation budget for today."""
 
     _attr_translation_key = "daily_water_budget"
     _attr_native_unit_of_measurement = UnitOfTime.MINUTES
@@ -307,11 +356,11 @@ class DailyBudgetSensor(_ControllerMetricSensor):
     @property
     def native_value(self) -> float:
         """Return the latest calculated daily runtime budget."""
-        return self.entry.runtime_data.coordinator.data.runtime_minutes
+        return self.coordinator.data.runtime_minutes
 
 
 class DeliveredTodaySensor(_ControllerMetricSensor):
-    """Expose measured irrigation runtime delivered today."""
+    """Expose measured pump-on runtime accumulated today."""
 
     _attr_translation_key = "delivered_today"
     _attr_native_unit_of_measurement = UnitOfTime.MINUTES
@@ -324,12 +373,12 @@ class DeliveredTodaySensor(_ControllerMetricSensor):
 
     @property
     def native_value(self) -> float:
-        """Return today's measured delivered runtime."""
+        """Return today's accumulated measured delivery."""
         return round(self.entry.runtime_data.controller.delivered_today_seconds() / 60, 3)
 
 
 class RemainingBudgetSensor(_ControllerMetricSensor):
-    """Expose today's remaining irrigation runtime budget."""
+    """Expose calculated budget not yet delivered during the local day."""
 
     _attr_translation_key = "remaining_water_budget"
     _attr_native_unit_of_measurement = UnitOfTime.MINUTES
@@ -342,12 +391,12 @@ class RemainingBudgetSensor(_ControllerMetricSensor):
 
     @property
     def native_value(self) -> float:
-        """Return calculated budget minus measured delivery."""
+        """Return current budget minus all manual and automatic delivery."""
         return _remaining_budget(self.entry)
 
 
 class PulseCountSensor(_ControllerMetricSensor):
-    """Expose the number of irrigation starts today."""
+    """Expose the number of confirmed pump-on pulses today."""
 
     _attr_translation_key = "pulse_count_today"
 
@@ -357,12 +406,12 @@ class PulseCountSensor(_ControllerMetricSensor):
 
     @property
     def native_value(self) -> int:
-        """Return today's pulse count."""
+        """Return today's confirmed pulse count."""
         return self.entry.runtime_data.controller.pulse_count_today()
 
 
 class DecisionReasonSensor(_ControllerMetricSensor):
-    """Explain why the controller is running, ready, waiting, or blocked."""
+    """Explain why the controller is watering, soaking, waiting, or blocked."""
 
     _attr_translation_key = "decision_reason"
 
@@ -377,17 +426,29 @@ class DecisionReasonSensor(_ControllerMetricSensor):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
-        """Return the values used to derive the decision."""
-        data = self.entry.runtime_data.coordinator.data
+        """Return values used to derive the current controller decision."""
+        data = self.coordinator.data
+        controller = self.entry.runtime_data.controller
         return {
             "daily_budget_minutes": data.runtime_minutes,
             "delivered_today_minutes": round(
-                self.entry.runtime_data.controller.delivered_today_seconds() / 60, 3
+                controller.delivered_today_seconds() / 60, 3
             ),
             "remaining_today_minutes": _remaining_budget(self.entry),
             "skip_reason": data.skip_reason,
-            "last_skip_reason": (
-                self.entry.runtime_data.controller.state.last_skip_reason
+            "last_skip_reason": controller.state.last_skip_reason,
+            "last_result": controller.state.last_result,
+            "decision_code": controller.state.decision_reason,
+            "error_message": controller.state.last_error,
+            "actuator_state": controller.actuator_state,
+            "actuator_is_active": controller.actuator_is_active,
+            "cycle_remaining_minutes": round(
+                controller.state.cycle_remaining_seconds / 60, 3
+            ),
+            "next_pulse_at": (
+                controller.state.next_pulse_at.isoformat()
+                if controller.state.next_pulse_at
+                else None
             ),
             "solar_sample_count": data.solar_sample_count,
             "solar_energy_last_hour_kwh": data.solar_energy_last_hour_kwh,
@@ -396,35 +457,47 @@ class DecisionReasonSensor(_ControllerMetricSensor):
 
 
 def _remaining_budget(entry: SolarIrrigationConfigEntry) -> float:
-    """Return the non-negative calculated runtime still available today."""
+    """Return the non-negative daily runtime still available for automation."""
     budget = entry.runtime_data.coordinator.data.runtime_minutes
     delivered = entry.runtime_data.controller.delivered_today_seconds() / 60
     return round(max(0.0, budget - delivered), 3)
 
 
 def _decision_reason(entry: SolarIrrigationConfigEntry) -> str:
-    """Return a concise explanation of the current controller decision."""
+    """Return a concise explanation of the current controller state."""
     controller = entry.runtime_data.controller
     data = entry.runtime_data.coordinator.data
-    if controller.state.status is ControllerStatus.IRRIGATING:
-        return "irrigation_running"
-    if controller.state.status is ControllerStatus.SLEEPING:
+    status = controller.state.status
+    if status is ControllerStatus.IRRIGATING:
+        return controller.state.decision_reason or "irrigation_pulse_running"
+    if status is ControllerStatus.SOAKING:
+        return "soil_soaking"
+    if status is ControllerStatus.SLEEPING:
         return controller.state.decision_reason or "outside_watering_window"
-    if controller.state.status is ControllerStatus.ERROR:
-        return controller.state.decision_reason or "controller_error"
+    if status is ControllerStatus.RAIN_PAUSED:
+        return controller.state.decision_reason or "rain_threshold_reached"
+    if status is ControllerStatus.DAILY_BUDGET_REACHED:
+        return "daily_budget_exhausted"
+    if status is ControllerStatus.ERROR:
+        return (
+            controller.state.last_error
+            or controller.state.decision_reason
+            or "Controller error"
+        )[:255]
+    if status is ControllerStatus.WAITING_FOR_HISTORY:
+        return "collecting_solar_history"
+    if status is ControllerStatus.WAITING_FOR_PULSE:
+        return controller.state.decision_reason or "waiting_for_water_demand"
     if controller.state.decision_reason and controller.state.decision_reason not in {
         "automatic_window_open",
-        "run_completed",
+        "cycle_completed",
+        "controller_initialized",
     }:
         return controller.state.decision_reason
-    if data.solar_sample_count == 0:
-        return "collecting_solar_history"
     if data.skip_reason is not None:
         return data.skip_reason
     if _remaining_budget(entry) <= 0:
         return "daily_budget_exhausted"
-    if controller.automatic_decision_made_today():
-        return "automatic_decision_completed"
     return "ready_for_automatic_evaluation"
 
 

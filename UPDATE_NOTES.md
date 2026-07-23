@@ -1,19 +1,27 @@
-# Solar Irrigation 2.3 controller-state synchronization fix
+# Solar Irrigation 2.5
 
-Updated files:
-
-- `custom_components/solar_irrigation/irrigation.py`
-- `custom_components/solar_irrigation/__init__.py`
-- `tests/test_irrigation.py`
-
-The controller now subscribes to the configured switch or valve state. If the
-entity turns off outside the controller timer, the active timer is cancelled,
-delivered runtime is accounted for, and the controller returns to `monitoring`.
-If the entity becomes `unknown` or `unavailable` during irrigation, the run is
-ended and controller status becomes `error`.
-
-Copy the package contents over the repository root, then run:
-
-```bash
-make test
-```
+- Implements serialized pulse-and-soak watering events.
+- Re-evaluates automatic need every 15 minutes without overlapping active cycles.
+- Enforces the shared manual/automatic daily water budget before every automatic pulse.
+- Confirms physical actuator state and reconciles external state changes.
+- Corrects `ignore_rain` behavior with calculated or explicit duration.
+- Adds maximum pulse and soak options.
+- Uses human-friendly config-entry selectors for actions while retaining legacy YAML compatibility.
+- Adds immediate push updates for controller observability.
+- Proportionally handles delayed cumulative-solar samples.
+- Expands tests for state-machine, scheduler, validation, diagnostics, and restart behavior.
+- Keeps controller status at Irrigating until the physical stop is confirmed and
+  accounts actuator stop latency in actual delivered time.
+- Preserves active timing after a failed stop so a later external off or restart
+  can account the complete pulse.
+- Rebuilds coarse solar history from the exact cumulative value since local
+  midnight after setup, restart, or daily reset.
+- Migrates config entries to schema version 3 and clamps legacy peak-demand
+  values to the supported range.
+- Hides Peak daily water demand from the options form after setup; the writable
+  number entity is now the single seasonal tuning control.
+- Normalizes legacy config-entry unique IDs to the selected actuator and blocks
+  duplicate-actuator migrations.
+- Validates valve entities for entity-level OPEN and CLOSE support.
+- Counts a still-active actuator through confirmed restart recovery, including
+  runtime beyond the originally requested pulse after a failed stop.

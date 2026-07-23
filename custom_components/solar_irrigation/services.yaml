@@ -1,37 +1,46 @@
 run_now:
   name: Run irrigation now
-  description: Start irrigation using the calculated runtime or an optional override.
+  description: >-
+    Start a manual pulse-and-soak watering event. Confirmed pump-on time is
+    accumulated in today's delivered total and reduces later automatic watering.
   fields:
-    entry_id:
+    config_entry_id:
       name: Configuration entry
-      description: Entry ID of the Solar Irrigation configuration to run.
+      description: Solar Irrigation configuration to run.
       required: true
       selector:
-        text:
+        config_entry:
+          integration: solar_irrigation
     duration:
       name: Duration
-      description: Optional runtime override in minutes.
+      description: >-
+        Optional total pump-on time in minutes. The integration divides this time
+        into configured watering pulses separated by soak intervals.
       required: false
       selector:
         number:
-          min: 0
+          min: 0.01
           max: 1440
-          step: 1
+          step: 0.1
           unit_of_measurement: min
+          mode: box
     ignore_rain:
       name: Ignore rain
-      description: Allow a manual run even when the rain threshold is reached.
+      description: >-
+        Ignore both rain blocking and rain reduction for this manual event. With
+        no duration, the dry solar-scaled remaining budget is used.
       required: false
       default: false
       selector:
         boolean:
 stop:
   name: Stop irrigation
-  description: Stop the active irrigation run for one configuration entry.
+  description: Stop the active watering or soak cycle.
   fields:
-    entry_id:
+    config_entry_id:
       name: Configuration entry
-      description: Entry ID of the Solar Irrigation configuration to stop.
+      description: Solar Irrigation configuration to stop.
       required: true
       selector:
-        text:
+        config_entry:
+          integration: solar_irrigation

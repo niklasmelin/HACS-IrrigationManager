@@ -5,15 +5,14 @@ from __future__ import annotations
 import ast
 import json
 import os
-from pathlib import Path
 import re
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
-
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 CUSTOM_COMPONENTS = REPOSITORY_ROOT / "custom_components"

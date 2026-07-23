@@ -28,13 +28,32 @@ def test_calculation_serialization_supports_optional_rain() -> None:
 
 
 def test_controller_state_round_trip() -> None:
-    """Test that persisted controller state can be restored without data loss."""
+    """Test current pulse, requested, actual, and result state round-trips."""
     state = SolarIrrigationControllerState(
-        status=ControllerStatus.COMPLETED,
-        last_duration_seconds=60,
-        last_skip_reason="rain_threshold_reached",
+        status=ControllerStatus.SOAKING,
+        requested_duration_seconds=420,
+        current_pulse_requested_seconds=180,
+        cycle_remaining_seconds=240,
+        last_duration_seconds=180,
+        last_result="partial",
+        next_pulse_at=datetime(2026, 1, 1, 12, 15, tzinfo=UTC),
+        last_skip_reason="watering_window_closed",
     )
     restored = SolarIrrigationControllerState.from_dict(state.as_dict())
-    assert restored.status is ControllerStatus.COMPLETED
+    assert restored.status is ControllerStatus.SOAKING
+    assert restored.requested_duration_seconds == 420
+    assert restored.current_pulse_requested_seconds == 180
+    assert restored.cycle_remaining_seconds == 240
+    assert restored.last_duration_seconds == 180
+    assert restored.last_result == "partial"
+    assert restored.next_pulse_at == datetime(2026, 1, 1, 12, 15, tzinfo=UTC)
+
+
+def test_legacy_completed_status_migrates_to_monitoring() -> None:
+    """Test older stored status text maps to the current controller model."""
+    restored = SolarIrrigationControllerState.from_dict(
+        {"status": "completed", "last_duration_seconds": 60}
+    )
+    assert restored.status is ControllerStatus.MONITORING
+    assert restored.requested_duration_seconds == 60
     assert restored.last_duration_seconds == 60
-    assert restored.last_skip_reason == "rain_threshold_reached"

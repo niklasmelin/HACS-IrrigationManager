@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import math
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN, UnitOfEnergy, UnitOfLength
@@ -15,18 +15,34 @@ from homeassistant.util import dt as dt_util
 
 from .const import (
     CM_TO_MM,
+    CONF_MAX_PULSE_DURATION,
     CONF_MAX_RUNTIME,
     CONF_MAX_SOLAR,
     CONF_RAIN_SENSOR,
     CONF_RAIN_SKIP_THRESHOLD,
     CONF_REMAINING_SENSOR,
+    CONF_SOAK_DURATION,
     CONF_SOLAR_SENSOR,
     CONF_UPDATE_INTERVAL,
+    DEFAULT_MAX_PULSE_DURATION,
     DEFAULT_MAX_RUNTIME,
     DEFAULT_MAX_SOLAR,
     DEFAULT_RAIN_SKIP_THRESHOLD,
+    DEFAULT_SOAK_DURATION,
     DEFAULT_UPDATE_INTERVAL,
     INCH_TO_MM,
+    MAX_MAX_PULSE_DURATION,
+    MAX_MAX_RUNTIME,
+    MAX_MAX_SOLAR,
+    MAX_RAIN_SKIP_THRESHOLD,
+    MAX_SOAK_DURATION,
+    MAX_UPDATE_INTERVAL,
+    MIN_MAX_PULSE_DURATION,
+    MIN_MAX_RUNTIME,
+    MIN_MAX_SOLAR,
+    MIN_RAIN_SKIP_THRESHOLD,
+    MIN_SOAK_DURATION,
+    MIN_UPDATE_INTERVAL,
     MINUTES_TO_SECONDS,
     MWH_TO_KWH,
     SOLAR_HISTORY_STORAGE_KEY_TEMPLATE,
@@ -43,12 +59,20 @@ from .models import (
     SolarIrrigationConfigEntry,
     SolarIrrigationData,
 )
+from .watering_window import entry_value
 
 _LOGGER = logging.getLogger(__name__)
 
 
 class SolarIrrigationCoordinator(DataUpdateCoordinator[SolarIrrigationData]):
-    """Read source sensors and calculate irrigation requirements."""
+    """Read source sensors and calculate the current daily water budget.
+
+    The actual daily solar sensor and the remaining-production forecast are both
+    normalized to kWh. Their sum estimates the complete solar production for the
+    current day. This estimate is divided by the configured peak daily solar
+    production and multiplied by peak daily water demand and the optional rain
+    factor. The result is a daily pump-runtime budget, not one uninterrupted run.
+    """
 
     config_entry: SolarIrrigationConfigEntry
 
@@ -57,13 +81,21 @@ class SolarIrrigationCoordinator(DataUpdateCoordinator[SolarIrrigationData]):
         hass: HomeAssistant,
         entry: SolarIrrigationConfigEntry,
     ) -> None:
-        """Initialize the coordinator for one config entry."""
-        configured_interval = int(
-            _entry_value(entry, CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
+        """Initialize the coordinator and entry-specific solar-history storage."""
+        try:
+            configured_interval = int(
+                entry_value(entry, CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL)
+            )
+        except (TypeError, ValueError):
+            configured_interval = DEFAULT_UPDATE_INTERVAL
+        # Refresh at least every 15 minutes so the cumulative solar sensor also
+        # supplies a rolling two-hour solar-radiation proxy. The minimum prevents
+        # a malformed legacy entry from creating a tight refresh loop before
+        # normal runtime validation reports the configuration error.
+        update_interval = min(
+            max(configured_interval, MIN_UPDATE_INTERVAL),
+            SOLAR_SAMPLE_INTERVAL_SECONDS,
         )
-        # Refresh at least every 15 minutes so the cumulative solar-energy sensor
-        # can also act as a rolling solar-radiation proxy.
-        update_interval = min(configured_interval, SOLAR_SAMPLE_INTERVAL_SECONDS)
         super().__init__(
             hass,
             _LOGGER,
@@ -89,40 +121,136 @@ class SolarIrrigationCoordinator(DataUpdateCoordinator[SolarIrrigationData]):
         self._prune_history(dt_util.utcnow())
         self._history_loaded = True
 
+    async def async_calculate_dry_budget_seconds(self) -> int:
+        """Return a fresh solar-scaled budget without reading optional rain.
+
+        Manual ``run_now`` calls with Ignore rain enabled still need current solar
+        production and the remaining-production forecast when no explicit
+        duration is supplied. Reading those inputs separately keeps that operator
+        override usable even when a configured rain sensor is unavailable.
+        The actual cumulative value is also sampled so manual operation does not
+        create a gap in the rolling solar history.
+        """
+        await self.async_load_history()
+        try:
+            actual = self._read_energy_sensor(
+                str(entry_value(self.config_entry, CONF_SOLAR_SENSOR, ""))
+            )
+            remaining = self._read_energy_sensor(
+                str(entry_value(self.config_entry, CONF_REMAINING_SENSOR, ""))
+            )
+            max_solar = float(
+                entry_value(self.config_entry, CONF_MAX_SOLAR, DEFAULT_MAX_SOLAR)
+            )
+            max_runtime = float(
+                entry_value(self.config_entry, CONF_MAX_RUNTIME, DEFAULT_MAX_RUNTIME)
+            )
+        except (TypeError, ValueError) as err:
+            raise UpdateFailed(str(err)) from err
+
+        _validate_range(
+            max_solar,
+            MIN_MAX_SOLAR,
+            MAX_MAX_SOLAR,
+            "Peak daily solar production",
+        )
+        _validate_range(
+            max_runtime,
+            MIN_MAX_RUNTIME,
+            MAX_MAX_RUNTIME,
+            "Peak daily water demand",
+        )
+        calculated_at = dt_util.utcnow()
+        await self._async_sample_solar(actual, calculated_at)
+        solar_factor = _clamp((actual + remaining) / max_solar)
+        return round(solar_factor * max_runtime * MINUTES_TO_SECONDS)
+
     async def _async_update_data(self) -> SolarIrrigationData:
         """Read current states and return a normalized calculation result."""
         await self.async_load_history()
         try:
             actual = self._read_energy_sensor(
-                str(_entry_value(self.config_entry, CONF_SOLAR_SENSOR, ""))
+                str(entry_value(self.config_entry, CONF_SOLAR_SENSOR, ""))
             )
             remaining = self._read_energy_sensor(
-                str(_entry_value(self.config_entry, CONF_REMAINING_SENSOR, ""))
+                str(entry_value(self.config_entry, CONF_REMAINING_SENSOR, ""))
             )
             max_solar = float(
-                _entry_value(self.config_entry, CONF_MAX_SOLAR, DEFAULT_MAX_SOLAR)
+                entry_value(self.config_entry, CONF_MAX_SOLAR, DEFAULT_MAX_SOLAR)
             )
             max_runtime = float(
-                _entry_value(self.config_entry, CONF_MAX_RUNTIME, DEFAULT_MAX_RUNTIME)
+                entry_value(self.config_entry, CONF_MAX_RUNTIME, DEFAULT_MAX_RUNTIME)
             )
-            rain_entity = _entry_value(self.config_entry, CONF_RAIN_SENSOR, None)
+            rain_entity = entry_value(self.config_entry, CONF_RAIN_SENSOR, None)
             rain_mm = self._read_rain_sensor(str(rain_entity)) if rain_entity else None
             rain_threshold = float(
-                _entry_value(
+                entry_value(
                     self.config_entry,
                     CONF_RAIN_SKIP_THRESHOLD,
                     DEFAULT_RAIN_SKIP_THRESHOLD,
                 )
             )
+            update_interval = float(
+                entry_value(
+                    self.config_entry,
+                    CONF_UPDATE_INTERVAL,
+                    DEFAULT_UPDATE_INTERVAL,
+                )
+            )
+            max_pulse_duration = float(
+                entry_value(
+                    self.config_entry,
+                    CONF_MAX_PULSE_DURATION,
+                    DEFAULT_MAX_PULSE_DURATION,
+                )
+            )
+            soak_duration = float(
+                entry_value(
+                    self.config_entry,
+                    CONF_SOAK_DURATION,
+                    DEFAULT_SOAK_DURATION,
+                )
+            )
         except (TypeError, ValueError) as err:
             raise UpdateFailed(str(err)) from err
 
-        if max_solar <= 0:
-            raise UpdateFailed("Maximum solar production must be greater than zero")
-        if max_runtime < 0:
-            raise UpdateFailed("Maximum runtime cannot be negative")
-        if rain_entity and rain_threshold <= 0:
-            raise UpdateFailed("Rain threshold must be greater than zero")
+        _validate_range(
+            max_solar,
+            MIN_MAX_SOLAR,
+            MAX_MAX_SOLAR,
+            "Peak daily solar production",
+        )
+        _validate_range(
+            max_runtime,
+            MIN_MAX_RUNTIME,
+            MAX_MAX_RUNTIME,
+            "Peak daily water demand",
+        )
+        _validate_range(
+            update_interval,
+            MIN_UPDATE_INTERVAL,
+            MAX_UPDATE_INTERVAL,
+            "Calculation update interval",
+        )
+        _validate_range(
+            max_pulse_duration,
+            MIN_MAX_PULSE_DURATION,
+            MAX_MAX_PULSE_DURATION,
+            "Maximum pulse duration",
+        )
+        _validate_range(
+            soak_duration,
+            MIN_SOAK_DURATION,
+            MAX_SOAK_DURATION,
+            "Soak duration",
+        )
+        if rain_entity:
+            _validate_range(
+                rain_threshold,
+                MIN_RAIN_SKIP_THRESHOLD,
+                MAX_RAIN_SKIP_THRESHOLD,
+                "Rain skip threshold",
+            )
 
         calculated_at = dt_util.utcnow()
         await self._async_sample_solar(actual, calculated_at)
@@ -136,9 +264,11 @@ class SolarIrrigationCoordinator(DataUpdateCoordinator[SolarIrrigationData]):
         skip_reason = _skip_reason(expected, rain_mm, rain_threshold, runtime_seconds)
 
         _LOGGER.debug(
-            "Solar evaluation actual=%.3f kWh expected=%.3f kWh runtime=%.2f min "
-            "samples=%d solar_1h=%.3f kWh solar_2h=%.3f kWh rolling=%.3f kWh/h",
+            "Solar evaluation actual=%.3f kWh remaining=%.3f kWh "
+            "expected=%.3f kWh budget=%.2f min samples=%d solar_1h=%.3f kWh "
+            "solar_2h=%.3f kWh rolling=%.3f kWh/h",
             actual,
+            remaining,
             expected,
             runtime_minutes,
             metrics["sample_count"],
@@ -168,13 +298,28 @@ class SolarIrrigationCoordinator(DataUpdateCoordinator[SolarIrrigationData]):
             solar_latest_sample_at=metrics["latest_sample_at"],
         )
 
-    async def _async_sample_solar(self, actual_kwh: float, timestamp) -> None:
-        """Store a normalized cumulative-energy delta when 15 minutes elapsed."""
+    async def _async_sample_solar(
+        self,
+        actual_kwh: float,
+        timestamp: datetime,
+    ) -> None:
+        """Store a cumulative-energy delta after a useful sampling interval.
+
+        Delayed samples remain valid. Their full accumulated energy is retained,
+        and rolling-window calculations later include only the proportional part
+        overlapping the one-hour or two-hour window. This preserves information
+        without treating several missed intervals as one instantaneous spike.
+        """
         history = self.solar_history
         if history.baseline_energy_kwh is None or history.baseline_at is None:
-            history.baseline_energy_kwh = actual_kwh
-            history.baseline_at = timestamp
-            await self._history_store.async_save(history.as_dict())
+            await self._async_rebaseline_from_local_midnight(actual_kwh, timestamp)
+            return
+
+        baseline_local_date = dt_util.as_local(history.baseline_at).date()
+        sample_local_date = dt_util.as_local(timestamp).date()
+        if baseline_local_date != sample_local_date:
+            _LOGGER.info("New local solar day detected; rebuilding history baseline")
+            await self._async_rebaseline_from_local_midnight(actual_kwh, timestamp)
             return
 
         elapsed_seconds = (timestamp - history.baseline_at).total_seconds()
@@ -183,48 +328,90 @@ class SolarIrrigationCoordinator(DataUpdateCoordinator[SolarIrrigationData]):
             return
 
         delta_kwh = actual_kwh - history.baseline_energy_kwh
-        # A daily-energy reset, source replacement, or correction establishes a
-        # fresh baseline. It must never create a negative production sample.
+        # A normal daily reset or source correction establishes a new baseline.
+        # A negative production sample must never be exposed to the algorithm.
         if delta_kwh < 0:
-            _LOGGER.info("Solar cumulative sensor reset detected; clearing history")
-            history.samples.clear()
-            history.baseline_energy_kwh = actual_kwh
-            history.baseline_at = timestamp
-            await self._history_store.async_save(history.as_dict())
+            _LOGGER.info("Solar cumulative sensor reset detected; rebuilding baseline")
+            await self._async_rebaseline_from_local_midnight(actual_kwh, timestamp)
             return
 
         rate = delta_kwh / (elapsed_seconds / 3600)
-        sample = SolarEnergySample(
-            timestamp=timestamp,
-            cumulative_energy_kwh=round(actual_kwh, 6),
-            delta_energy_kwh=round(delta_kwh, 6),
-            elapsed_seconds=round(elapsed_seconds, 3),
-            rate_kwh_per_hour=round(rate, 6),
+        history.samples.append(
+            SolarEnergySample(
+                timestamp=timestamp,
+                cumulative_energy_kwh=round(actual_kwh, 6),
+                delta_energy_kwh=round(delta_kwh, 6),
+                elapsed_seconds=round(elapsed_seconds, 3),
+                rate_kwh_per_hour=round(rate, 6),
+            )
         )
-        history.samples.append(sample)
         history.baseline_energy_kwh = actual_kwh
         history.baseline_at = timestamp
         self._prune_history(timestamp)
         await self._history_store.async_save(history.as_dict())
 
-    def _prune_history(self, timestamp) -> None:
+    async def _async_rebaseline_from_local_midnight(
+        self,
+        actual_kwh: float,
+        timestamp: datetime,
+    ) -> None:
+        """Rebuild history from the cumulative value measured since midnight.
+
+        The daily source value remains meaningful after a restart or missed samples.
+        Representing it as one interval from local midnight preserves the exact total
+        energy while the overlap calculation spreads only a proportional share into
+        the latest one-hour and two-hour windows. Later 15-minute samples naturally
+        replace this coarse estimate as the rolling window advances.
+        """
+        history = self.solar_history
+        history.samples.clear()
+        local_timestamp = dt_util.as_local(timestamp)
+        local_midnight = local_timestamp.replace(
+            hour=0,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        interval_start = local_midnight.astimezone(timestamp.tzinfo)
+        elapsed_seconds = max(0.0, (timestamp - interval_start).total_seconds())
+        if elapsed_seconds >= SOLAR_SAMPLE_MIN_ELAPSED_SECONDS:
+            rate = actual_kwh / (elapsed_seconds / 3600)
+            history.samples.append(
+                SolarEnergySample(
+                    timestamp=timestamp,
+                    cumulative_energy_kwh=round(actual_kwh, 6),
+                    delta_energy_kwh=round(actual_kwh, 6),
+                    elapsed_seconds=round(elapsed_seconds, 3),
+                    rate_kwh_per_hour=round(rate, 6),
+                )
+            )
+        history.baseline_energy_kwh = actual_kwh
+        history.baseline_at = timestamp
+        self._prune_history(timestamp)
+        await self._history_store.async_save(history.as_dict())
+
+    def _prune_history(self, timestamp: datetime) -> None:
         """Discard samples whose end timestamp is outside the two-hour window."""
         cutoff = timestamp - timedelta(seconds=SOLAR_HISTORY_WINDOW_SECONDS)
         self.solar_history.samples = [
             sample for sample in self.solar_history.samples if sample.timestamp >= cutoff
         ]
 
-    def _history_metrics(self, timestamp) -> dict[str, Any]:
-        """Calculate observable rolling solar metrics from accepted samples."""
+    def _history_metrics(self, timestamp: datetime) -> dict[str, Any]:
+        """Calculate observable rolling metrics using interval overlap.
+
+        A delayed sample can represent more than 15 minutes. Only the fraction of
+        its energy and elapsed time that overlaps the requested window is counted.
+        This balanced treatment avoids both discarding useful accumulated energy
+        and falsely assigning a multi-hour delta entirely to the latest hour.
+        """
         self._prune_history(timestamp)
         samples = self.solar_history.samples
         hour_cutoff = timestamp - timedelta(seconds=SOLAR_RECENT_WINDOW_SECONDS)
-        recent = [sample for sample in samples if sample.timestamp >= hour_cutoff]
+        two_hour_cutoff = timestamp - timedelta(seconds=SOLAR_HISTORY_WINDOW_SECONDS)
 
-        energy_1h = sum(sample.delta_energy_kwh for sample in recent)
-        energy_2h = sum(sample.delta_energy_kwh for sample in samples)
-        elapsed_1h = sum(sample.elapsed_seconds for sample in recent)
-        elapsed_2h = sum(sample.elapsed_seconds for sample in samples)
+        energy_1h, elapsed_1h = _window_totals(samples, hour_cutoff, timestamp)
+        energy_2h, elapsed_2h = _window_totals(samples, two_hour_cutoff, timestamp)
         rate_1h = energy_1h / (elapsed_1h / 3600) if elapsed_1h else 0.0
         rate_2h = energy_2h / (elapsed_2h / 3600) if elapsed_2h else 0.0
         rolling_rate = 0.7 * rate_1h + 0.3 * rate_2h
@@ -291,9 +478,33 @@ class SolarIrrigationCoordinator(DataUpdateCoordinator[SolarIrrigationData]):
         return value, unit
 
 
-def _entry_value(entry: SolarIrrigationConfigEntry, key: str, default: Any) -> Any:
-    """Read a config option, falling back to immutable entry data."""
-    return entry.options.get(key, entry.data.get(key, default))
+def _window_totals(
+    samples: list[SolarEnergySample],
+    cutoff: datetime,
+    timestamp: datetime,
+) -> tuple[float, float]:
+    """Return energy and elapsed seconds overlapping a rolling time window."""
+    energy = 0.0
+    elapsed = 0.0
+    for sample in samples:
+        if sample.elapsed_seconds <= 0:
+            continue
+        sample_start = sample.timestamp - timedelta(seconds=sample.elapsed_seconds)
+        overlap_start = max(sample_start, cutoff)
+        overlap_end = min(sample.timestamp, timestamp)
+        overlap_seconds = (overlap_end - overlap_start).total_seconds()
+        if overlap_seconds <= 0:
+            continue
+        fraction = min(1.0, overlap_seconds / sample.elapsed_seconds)
+        energy += sample.delta_energy_kwh * fraction
+        elapsed += overlap_seconds
+    return energy, elapsed
+
+
+def _validate_range(value: float, minimum: float, maximum: float, label: str) -> None:
+    """Raise ``UpdateFailed`` when a configured numeric value is out of range."""
+    if not math.isfinite(value) or not minimum <= value <= maximum:
+        raise UpdateFailed(f"{label} must be between {minimum:g} and {maximum:g}")
 
 
 def _clamp(value: float) -> float:
@@ -307,7 +518,7 @@ def _skip_reason(
     rain_threshold: float,
     runtime_seconds: int,
 ) -> str | None:
-    """Return the reason irrigation should be skipped, when applicable."""
+    """Return the reason the current daily budget is zero, when applicable."""
     if rain_mm is not None and rain_mm >= rain_threshold:
         return "rain_threshold_reached"
     if expected_solar <= 0:

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry
 
@@ -17,7 +18,13 @@ if TYPE_CHECKING:
 
 @dataclass(frozen=True, slots=True)
 class SolarEnergySample:
-    """Represent one accepted cumulative-energy delta sample."""
+    """Represent one accepted cumulative-energy delta sample.
+
+    ``timestamp`` is the end of the measurement interval. The start of the
+    interval is derived from ``elapsed_seconds``. Keeping the interval duration
+    allows rolling-window calculations to proportionally include delayed or
+    partially overlapping samples instead of discarding otherwise valid energy.
+    """
 
     timestamp: datetime
     cumulative_energy_kwh: float
@@ -82,7 +89,14 @@ class SolarHistoryState:
 
 @dataclass(frozen=True, slots=True)
 class SolarIrrigationData:
-    """Contain normalized inputs, solar history, and irrigation output."""
+    """Contain normalized inputs, rolling history, and the daily water budget.
+
+    ``actual_solar_kwh`` is the cumulative production measured since midnight.
+    ``remaining_solar_kwh`` is the forecast production still expected today.
+    Their sum is ``expected_solar_kwh`` and is normalized against the configured
+    peak daily solar production. The resulting solar factor, optional rain
+    factor, and peak daily water demand form the current daily runtime budget.
+    """
 
     actual_solar_kwh: float
     remaining_solar_kwh: float
@@ -113,16 +127,30 @@ class SolarIrrigationData:
 
 @dataclass(slots=True)
 class SolarIrrigationControllerState:
-    """Track persistent and observable controller state."""
+    """Track persistent execution, accounting, and observability state.
+
+    Delivered runtime is accumulated after every completed or interrupted pulse.
+    ``requested_duration_seconds`` describes the most recently requested event,
+    while ``last_duration_seconds`` is the actual pump-on time delivered by that
+    event. ``cycle_remaining_seconds`` and ``next_pulse_at`` explain an active
+    run-soak-run cycle.
+    """
 
     status: ControllerStatus = ControllerStatus.INITIALIZING
     last_execution: datetime | None = None
     active_started_at: datetime | None = None
     active_end_at: datetime | None = None
+    next_pulse_at: datetime | None = None
+    requested_duration_seconds: int = 0
+    current_pulse_requested_seconds: int = 0
+    cycle_remaining_seconds: int = 0
     last_duration_seconds: int = 0
+    last_result: str | None = None
     last_skip_reason: str | None = None
     last_error: str | None = None
     decision_reason: str | None = None
+    # Retained only so older persisted state can round-trip safely. Multiple
+    # automatic cycles per day no longer use a once-per-day decision marker.
     last_automatic_date: str | None = None
     delivery_date: str | None = None
     delivered_today_seconds: int = 0
@@ -135,7 +163,12 @@ class SolarIrrigationControllerState:
             "last_execution": _isoformat(self.last_execution),
             "active_started_at": _isoformat(self.active_started_at),
             "active_end_at": _isoformat(self.active_end_at),
+            "next_pulse_at": _isoformat(self.next_pulse_at),
+            "requested_duration_seconds": self.requested_duration_seconds,
+            "current_pulse_requested_seconds": self.current_pulse_requested_seconds,
+            "cycle_remaining_seconds": self.cycle_remaining_seconds,
             "last_duration_seconds": self.last_duration_seconds,
+            "last_result": self.last_result,
             "last_skip_reason": self.last_skip_reason,
             "last_error": self.last_error,
             "decision_reason": self.decision_reason,
@@ -147,13 +180,23 @@ class SolarIrrigationControllerState:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SolarIrrigationControllerState:
-        """Create controller state from persisted storage data."""
+        """Create controller state from current or legacy persisted data."""
+        legacy_duration = int(data.get("last_duration_seconds", 0))
         return cls(
             status=_parse_controller_status(data.get("status")),
             last_execution=_parse_datetime(data.get("last_execution")),
             active_started_at=_parse_datetime(data.get("active_started_at")),
             active_end_at=_parse_datetime(data.get("active_end_at")),
-            last_duration_seconds=int(data.get("last_duration_seconds", 0)),
+            next_pulse_at=_parse_datetime(data.get("next_pulse_at")),
+            requested_duration_seconds=int(
+                data.get("requested_duration_seconds", legacy_duration)
+            ),
+            current_pulse_requested_seconds=int(
+                data.get("current_pulse_requested_seconds", 0)
+            ),
+            cycle_remaining_seconds=int(data.get("cycle_remaining_seconds", 0)),
+            last_duration_seconds=legacy_duration,
+            last_result=data.get("last_result"),
             last_skip_reason=data.get("last_skip_reason"),
             last_error=data.get("last_error"),
             decision_reason=data.get("decision_reason"),
@@ -172,6 +215,7 @@ class SolarIrrigationRuntimeData:
     controller: SolarIrrigationController
     cancel_schedule: Callable[[], None] | None = None
     remove_update_listener: Callable[[], None] | None = None
+    suppress_next_reload: bool = False
 
 
 SolarIrrigationConfigEntry = ConfigEntry[SolarIrrigationRuntimeData]
@@ -188,14 +232,7 @@ def _parse_datetime(value: str | None) -> datetime | None:
 
 
 def _parse_controller_status(value: Any) -> ControllerStatus:
-    """Translate persisted legacy status strings into the 2.2 state model.
-
-    Versions before 2.2 used ``idle``, ``scheduled``, ``running`` and
-    ``completed`` as long-lived controller states. Version 2.2 separates the
-    current operating state from the result of the previous run, so both idle
-    and completed safely map to monitoring. Unknown values also map to
-    monitoring to avoid blocking startup after an upgrade.
-    """
+    """Translate persisted legacy status strings into the current state model."""
     legacy = {
         "idle": ControllerStatus.MONITORING,
         "scheduled": ControllerStatus.WAITING_FOR_PULSE,

@@ -4,18 +4,20 @@
     "step": {
       "user": {
         "title": "Configure Solar Irrigation",
-        "description": "Configure source entities, water-demand calibration, rain handling, and the automatic watering window.",
+        "description": "Configure solar inputs, irrigation output, rain handling, pulse-and-soak delivery, and the automatic watering window.",
         "data": {
           "solar_sensor": "Solar energy produced sensor",
           "remaining_sensor": "Remaining solar forecast sensor",
           "irrigation_entity": "Irrigation switch or valve",
           "rain_sensor": "Rain sensor (optional)",
           "max_solar": "Peak daily solar production",
-          "max_runtime": "Initial peak daily water demand",
+          "max_runtime": "Peak daily water demand",
           "rain_skip_threshold": "Rain amount that skips irrigation",
           "update_interval": "Calculation update interval",
           "watering_window_start": "Automatic watering window start",
-          "watering_window_end": "Automatic watering window end"
+          "watering_window_end": "Automatic watering window end",
+          "max_pulse_duration": "Maximum continuous watering pulse",
+          "soak_duration": "Soak time between pulses"
         }
       },
       "init": {
@@ -27,21 +29,25 @@
           "irrigation_entity": "Irrigation switch or valve",
           "rain_sensor": "Rain sensor (optional)",
           "max_solar": "Peak daily solar production",
-          "max_runtime": "Initial peak daily water demand",
           "rain_skip_threshold": "Rain amount that skips irrigation",
           "update_interval": "Calculation update interval",
           "watering_window_start": "Automatic watering window start",
-          "watering_window_end": "Automatic watering window end"
+          "watering_window_end": "Automatic watering window end",
+          "max_pulse_duration": "Maximum continuous watering pulse",
+          "soak_duration": "Soak time between pulses"
         }
       }
     },
     "error": {
       "invalid_entity": "The selected entity does not exist.",
-      "unavailable": "The selected sensor is unavailable.",
+      "unavailable": "The selected entity is unavailable.",
       "not_numeric": "The selected sensor does not have a numeric state.",
       "invalid_unit": "The selected sensor uses an unsupported unit.",
       "invalid_value": "The value must be finite and within the supported range.",
-      "invalid_watering_window": "The watering window start and end times must be different."
+      "invalid_watering_window": "The watering window start and end times must be different.",
+      "invalid_irrigation_entity": "Select an existing switch or valve entity.",
+      "unsupported_irrigation_entity": "The selected irrigation entity does not provide the required start and stop services.",
+      "already_configured": "This irrigation entity is already used by another Solar Irrigation entry."
     },
     "abort": {
       "already_configured": "This irrigation entity is already configured."
@@ -51,28 +57,32 @@
     "step": {
       "init": {
         "title": "Update Solar Irrigation options",
-        "description": "Configure source entities, water-demand calibration, rain handling, and the automatic watering window.",
+        "description": "Configure solar inputs, irrigation output, rain handling, pulse-and-soak delivery, and the automatic watering window.",
         "data": {
           "solar_sensor": "Solar energy produced sensor",
           "remaining_sensor": "Remaining solar forecast sensor",
           "irrigation_entity": "Irrigation switch or valve",
           "rain_sensor": "Rain sensor (optional)",
           "max_solar": "Peak daily solar production",
-          "max_runtime": "Initial peak daily water demand",
           "rain_skip_threshold": "Rain amount that skips irrigation",
           "update_interval": "Calculation update interval",
           "watering_window_start": "Automatic watering window start",
-          "watering_window_end": "Automatic watering window end"
+          "watering_window_end": "Automatic watering window end",
+          "max_pulse_duration": "Maximum continuous watering pulse",
+          "soak_duration": "Soak time between pulses"
         }
       }
     },
     "error": {
       "invalid_entity": "The selected entity does not exist.",
-      "unavailable": "The selected sensor is unavailable.",
+      "unavailable": "The selected entity is unavailable.",
       "not_numeric": "The selected sensor does not have a numeric state.",
       "invalid_unit": "The selected sensor uses an unsupported unit.",
       "invalid_value": "The value must be finite and within the supported range.",
-      "invalid_watering_window": "The watering window start and end times must be different."
+      "invalid_watering_window": "The watering window start and end times must be different.",
+      "invalid_irrigation_entity": "Select an existing switch or valve entity.",
+      "unsupported_irrigation_entity": "The selected irrigation entity does not provide the required start and stop services.",
+      "already_configured": "This irrigation entity is already used by another Solar Irrigation entry."
     }
   },
   "entity": {
@@ -159,31 +169,42 @@
   "services": {
     "run_now": {
       "name": "Run irrigation now",
-      "description": "Start irrigation using the calculated runtime or an optional override.",
+      "description": "Start a manual pulse-and-soak watering event. The confirmed pump-on time is added to today's delivered total.",
       "fields": {
-        "entry_id": {
-          "name": "Configuration entry",
-          "description": "Entry ID to run."
-        },
         "duration": {
           "name": "Duration",
-          "description": "Optional runtime in minutes."
+          "description": "Optional total pump-on time in minutes. The time is divided into configured pulses."
         },
         "ignore_rain": {
           "name": "Ignore rain",
-          "description": "Allow a manual run despite rain."
+          "description": "Ignore rain blocking and rain reduction for this manual event."
+        },
+        "config_entry_id": {
+          "name": "Configuration entry",
+          "description": "Solar Irrigation configuration to run."
         }
       }
     },
     "stop": {
       "name": "Stop irrigation",
-      "description": "Stop active irrigation.",
+      "description": "Stop the active watering or soak cycle.",
       "fields": {
-        "entry_id": {
+        "config_entry_id": {
           "name": "Configuration entry",
-          "description": "Entry ID to stop."
+          "description": "Solar Irrigation configuration to stop."
         }
       }
+    }
+  },
+  "exceptions": {
+    "entry_not_found": {
+      "message": "Solar Irrigation configuration entry {entry_id} was not found."
+    },
+    "entry_not_loaded": {
+      "message": "Solar Irrigation configuration entry {entry_id} is not loaded."
+    },
+    "source_data_unavailable": {
+      "message": "Solar or rain source data is unavailable. Refresh the source entities or use an explicit duration with Ignore rain enabled."
     }
   }
 }

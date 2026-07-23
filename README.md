@@ -1,241 +1,500 @@
-# Solar Irrigation 2.4
+# Solar Irrigation
 
-Solar Irrigation is a Home Assistant custom integration for conservative, weather-dependent garden irrigation. It estimates the total water demand for the current local calendar day from actual and forecast solar production, reduces demand when rain is measured, and exposes the internal calculation so the system can be tuned safely.
+Solar Irrigation is a Home Assistant custom integration for conservative,
+weather-dependent garden irrigation. It combines measured solar production, the
+forecast solar production remaining for the day, optional rain, and a seasonal
+water-demand setting. The resulting daily pump-runtime budget is delivered as
+short watering pulses separated by soak periods.
 
-Version 2.4 uses a configurable **Automatic watering window** instead of the legacy single **Daily irrigation time**. The controller evaluates automatic irrigation every 15 minutes, reports `sleeping` outside that window, and cannot start automatic irrigation at night unless the user deliberately configures an overnight window. The rolling two-hour solar history, daily budget, persistent delivery counters, and writable **Peak daily water demand** remain the basis for pulse-and-soak development.
+Version **2.5.2** implements the complete pulse-and-soak controller, shared daily
+budget accounting for automatic and manual watering, physical pump-state
+confirmation, immediate controller observability, and config-entry selectors for
+manual actions.
 
-## Design goals
+## Why pulse and soak?
 
-The integration is designed for beds and pots irrigated by a drip line or other low-flow system. Dry potting soil can become difficult to re-wet, and a long continuous run may pass through a pot before the growing medium has absorbed the water. The controller therefore treats calculated runtime as a **daily water budget**, not as an instruction that all water must be delivered in one uninterrupted run.
+Dry soil, especially potting soil, can initially repel water. One long continuous
+run may pass through a pot or follow cracks in a bed before the root zone has time
+to absorb it. Solar Irrigation therefore divides one watering event into several
+short pump-on periods:
 
-The algorithm separates four concerns:
+```text
+water pulse -> soak -> water pulse -> soak -> final water pulse
+```
 
-1. **How much water may be needed today** — estimated from actual solar energy plus the remaining solar-production forecast.
-2. **How strongly the sun has affected the garden recently** — estimated from 15-minute deltas of the cumulative daily solar-energy sensor, retained for two hours.
-3. **How much water the crop and irrigation circuit need at peak seasonal demand** — controlled by the writable Peak daily water demand entity.
-4. **How much has already been delivered today** — persisted and subtracted from the current budget.
+Only pump-on time consumes the daily water budget. The pump is off during each
+soak interval.
 
-## Inputs and parameters
+Example with a seven-minute event, a three-minute maximum pulse, and a 15-minute
+soak interval:
 
-### Daily solar energy sensor
+```text
+3 min water
+15 min soak
+3 min water
+15 min soak
+1 min water
+```
 
-A cumulative energy sensor representing solar production since the start of the day. Supported units are Wh, kWh and MWh; all values are normalized internally to kWh.
+The event delivers seven minutes of water while taking approximately 37 minutes
+to complete.
 
-This sensor is used in two ways:
+## Required inputs
 
-- Its current value contributes to the estimate of total solar production for today.
-- Its increase between samples provides a proxy for recent solar radiation.
+### Solar energy produced today
 
-The source should reset daily. A negative delta is treated as a reset or source correction: the rolling history is cleared and a new baseline is established, so negative production can never influence irrigation.
+A cumulative energy sensor representing actual solar production since local
+midnight. Supported units are Wh, kWh, and MWh. The source should normally reset
+each day.
 
-### Remaining solar production forecast sensor
+This value has two uses:
 
-An energy sensor estimating how much additional solar energy will be produced during the remainder of the current day. Supported units are Wh, kWh and MWh.
+1. It contributes to the expected total solar production for the day.
+2. Its 15-minute deltas form an observable two-hour history of recent solar
+   production.
 
-This forecast is important early in the day. On a sunny morning, actual production may still be low, but a large remaining forecast allows the controller to allocate a realistic daily budget instead of waiting until the afternoon.
+### Remaining solar production forecast
+
+An energy sensor estimating how much additional solar energy will be produced
+before the end of the current day. Supported units are Wh, kWh, and MWh.
+
+The forecast is important in the morning. Actual production may still be low,
+but a large remaining forecast allows the integration to allocate an appropriate
+water budget before most of the day's sunlight has occurred.
+
+### Irrigation switch or valve
+
+The physical Home Assistant `switch` or `valve` that controls water delivery.
+The config flow verifies that the entity exists, is available, and that its
+start and stop services are registered.
+
+Solar Irrigation confirms the reported entity state after every start and stop
+command. The controller remains **Irrigating** until the physical entity is
+confirmed inactive, and any actuator stop latency is included in delivered-time
+accounting. It also monitors external state changes:
+
+- an external stop ends the active event and accounts elapsed pump-on time;
+- an unavailable actuator ends the event and reports an error;
+- an actuator started outside Solar Irrigation, including during a soak period,
+  is stopped for safety and reported as an error.
+
+### Rain sensor, optional
+
+A precipitation sensor in mm, cm, or inches. When omitted, the rain factor is
+always 100 percent.
+
+## Daily water-budget algorithm
+
+### 1. Estimate total solar production
+
+```text
+expected solar today = actual solar today + remaining solar forecast
+```
+
+The integration exposes all three values separately:
+
+- **Actual solar** is the normalized cumulative source measurement.
+- **Remaining solar** is the normalized forecast still expected today.
+- **Expected solar today** is their sum and is the value used to scale demand.
+
+Keeping all three entities is intentional: it makes forecast changes and the
+calculated total easy to inspect.
+
+### 2. Calculate the solar factor
+
+```text
+solar factor = clamp(
+    expected solar today / peak daily solar production,
+    0,
+    1
+)
+```
+
+### 3. Calculate the rain factor
+
+With no rain sensor:
+
+```text
+rain factor = 1
+```
+
+With a rain sensor:
+
+```text
+rain factor = clamp(
+    1 - measured rain / rain skip threshold,
+    0,
+    1
+)
+```
+
+Rain at or above the threshold makes the automatic budget zero.
+
+### 4. Calculate today's pump-runtime budget
+
+```text
+daily water budget =
+    peak daily water demand
+    x solar factor
+    x rain factor
+```
+
+The result is expressed in minutes of actual pump-on time for the current local
+calendar day.
+
+### 5. Subtract all confirmed delivery
+
+Manual and automatic watering share the same delivery counter:
+
+```text
+remaining budget = max(
+    0,
+    daily water budget - delivered today
+)
+```
+
+An explicit manual duration may intentionally exceed the current automatic
+budget. Its confirmed pump-on time is still added to **Delivered today**, so
+future automatic evaluations remain suppressed until the calculated budget is
+larger than the accumulated delivery.
+
+## Automatic scheduling every 15 minutes
+
+Automatic irrigation is evaluated every 15 minutes while Home Assistant is
+running.
+
+The calculated daily budget is distributed across the configured watering
+window. At each evaluation the integration calculates how much of the current
+budget should be due by that point in the window. It uses one 15-minute lookahead
+so the final scheduled evaluation can make the complete budget due before the
+exclusive window end.
+
+Conceptually:
+
+```text
+target delivered by now = daily budget x watering-window progress
+new event amount = min(
+    remaining daily budget,
+    max(0, target delivered by now - delivered today)
+)
+```
+
+Events below one minute are deferred to a later evaluation. This avoids very
+short actuator operations.
+
+If a watering or soak cycle is already active, the periodic evaluator does
+nothing. No overlapping event can be scheduled. When the current event has
+finished, the next 15-minute evaluation uses fresh data and decides whether more
+water is due.
+
+### Changes while an event is active
+
+Before every new automatic pulse, the controller refreshes source data and
+rechecks:
+
+- the watering window;
+- rain blocking;
+- the latest daily budget;
+- all delivery already accumulated today.
+
+If a forecast revision, rain measurement, or manual delivery reduces the
+remaining budget, later pulses are shortened or cancelled. If the budget grows,
+the current event is not expanded beyond its original request; the next normal
+15-minute evaluation schedules any additional amount that has become due.
+
+## Watering window and night behavior
+
+Default automatic window:
+
+```text
+05:00:00 to 22:00:00
+```
+
+Outside the window the controller reports **Sleeping** and does not start new
+automatic pulses. A pulse already in progress is allowed to finish, but no new
+pulse starts after the window has closed.
+
+A window that crosses midnight is accepted, but a same-day daytime/evening
+window is strongly recommended because delivery accounting resets at local
+midnight. Equal start and end times are rejected.
+
+Manual `run_now` actions are allowed outside the automatic window.
+
+## Solar history
+
+The cumulative actual-solar sensor is sampled at most once every 15 minutes.
+Accepted deltas are retained for two hours and exposed through the **Solar
+history** entity and downloaded diagnostics.
+
+Available observations include:
+
+- latest accepted delta;
+- energy produced during the last hour;
+- energy produced during the last two hours;
+- average kWh/h during each window;
+- a rolling kWh/h value weighted 70 percent toward the last hour and 30 percent
+  toward the full two-hour window;
+- timestamp, cumulative value, delta, elapsed time, and normalized rate for every
+  retained sample.
+
+A delayed reading is not discarded. The cumulative delta remains valid, so the
+integration stores it with its actual elapsed interval. Rolling calculations
+include only the proportional part of that interval overlapping the requested
+one-hour or two-hour window. This avoids both losing valid energy and treating a
+multi-hour accumulated delta as an instantaneous spike.
+
+After first setup, restart, or a detected daily reset, the current cumulative
+value is represented as one coarse interval beginning at local midnight. The
+total energy is exact, while its distribution inside that interval is an average
+estimate. Normal 15-minute samples replace the coarse interval as the two-hour
+window advances. A negative delta never enters the algorithm.
+
+The **Solar history** entity state is the number of retained samples. There is no
+separate sample-count entity. In version 2.5 the history is an observability and
+tuning input; it does not independently add water beyond the daily budget derived
+from actual production plus the remaining-production forecast. The 15-minute
+evaluator still reacts to every updated budget and delivery total.
+
+## Configuration parameters
 
 ### Peak daily solar production
 
-A fixed installation calibration in kWh/day. It represents a strong or peak production day for the configured photovoltaic system. It is normally configured once and only adjusted when the PV system, forecast source or calibration method changes.
+- Unit: kWh/day
+- Range: 0.001 to 10,000
+- Default: 65
+- Location: integration configuration/options
 
-The solar demand factor is:
-
-```text
-estimated total solar = actual solar today + forecast remaining solar
-solar factor = clamp(estimated total solar / peak daily solar production, 0, 1)
-```
-
-A factor of 0.50 means the estimated solar conditions correspond to roughly half of the configured peak-production day. Values above the peak reference are capped at 1.0.
+A fixed calibration for the photovoltaic system and forecast source. It
+represents a strong or peak production day. It normally changes only when the PV
+system or forecast method changes.
 
 ### Peak daily water demand
 
-A writable Home Assistant number entity with an allowed range of **10–240 minutes per day**, in one-minute steps.
+- Unit: minutes/day
+- Range: 10 to 240
+- Step: 1 minute
+- Default: 60
+- Location: writable Home Assistant `number` entity
 
-This is the main seasonal tuning control. It means:
+The total pump-on time that the crops and irrigation circuit would need on a peak
+solar day with no rain. It is both a seasonal crop-demand scale and the maximum
+automatic daily budget before solar and rain factors are applied.
 
-> The total pump-on time required by this irrigation circuit on a peak-demand day before rain reduction.
+Adjust it as plants mature, fruit, or decline during the season. Updating the
+number refreshes calculations in place and does not reload or interrupt an active
+event. An automatic event rechecks the new budget before its next pulse.
 
-It has two simultaneous roles:
+### Rain amount that skips irrigation
 
-- **Seasonal scale factor:** increase it as crop size, leaf area and root mass increase; reduce it for seedlings or late-season decline.
-- **Safety ceiling:** automatic irrigation must not deliver more than this amount during one local calendar day.
+- Unit: mm
+- Range: 0.1 to 1,000
+- Default: 5
 
-Changing the value persists it through Home Assistant restarts and immediately reloads the integration so the daily and remaining budgets are recalculated. An active irrigation run is not lengthened or shortened; only future automatic decisions use the new value.
+The rain amount at which the automatic rain factor reaches zero. Half the
+threshold produces approximately a 50 percent rain factor.
 
-Typical tuning examples are installation-specific, but a progression might be lower values for seedlings, larger values for mature fruiting tomatoes and corn, and lower values again late in the season.
+### Maximum continuous watering pulse
 
-### Rain sensor (optional)
+- Unit: minutes
+- Range: 1 to 30
+- Default: 3
 
-A cumulative or daily rain sensor supporting mm, cm or inches. The value is normalized to millimetres.
+The longest continuous pump-on period within one event. Smaller values reduce
+runoff and improve absorption in dry pots or beds.
 
-When configured, rain reduces the daily budget linearly until the configured rain skip threshold is reached:
+### Soak time between pulses
 
-```text
-rain factor = clamp(1 - rain / rain skip threshold, 0, 1)
-```
+- Unit: minutes
+- Range: 1 to 120
+- Default: 15
 
-At or above the threshold, the rain factor is zero and automatic irrigation is blocked. When no rain sensor is configured, the rain factor is 1.0. If a configured rain sensor is unavailable, automatic calculation fails safely rather than assuming no rain.
+The pump-off interval after each non-final pulse. During this time the controller
+reports **Soaking** and no other event can start.
 
-### Rain skip threshold
+### Calculation update interval
 
-The amount of measured rain that reduces the automatic daily water budget to zero. Half of this amount produces approximately a 50% rain factor.
+- Unit: seconds
+- Range: 60 to 86,400
+- Default: 3,600
 
-### Update interval
+The requested coordinator interval. Solar Irrigation internally refreshes at
+least every 15 minutes because the automatic evaluator and solar-history sampler
+need current values. Shorter refreshes do not create extra history samples until
+the minimum sampling interval has elapsed.
 
-The requested coordinator refresh period in seconds. Solar Irrigation samples the cumulative solar sensor at least every 15 minutes, so a longer configured interval is internally limited to 15 minutes for solar-history collection. Shorter coordinator updates do not create excessive samples: a new delta is accepted only after the minimum sampling interval has elapsed.
+### Automatic watering window start/end
 
-### Automatic watering window start
+- Defaults: 05:00:00 and 22:00:00
 
-The earliest local time at which automatic irrigation is permitted. The default is `05:00:00`. The 15-minute evaluator may therefore make its first automatic decision at the first evaluation on or after this time. Manual `run_now` service calls are not restricted by the window.
+The inclusive start and exclusive end of automatic watering. Manual actions are
+not restricted by this window.
 
-### Automatic watering window end
+## Manual actions
 
-The local time at which new automatic irrigation becomes blocked. The default is `22:00:00`. The end is exclusive: with a `05:00-22:00` window, an evaluation at exactly 22:00 enters `sleeping` and does not start a run. An irrigation run that began before the window closed is allowed to finish safely.
-
-Both normal daytime windows and windows that cross midnight are supported. For example, `22:00-05:00` is an overnight window. Equal start and end times are rejected because they are ambiguous and would not provide a safe sleep period.
-
-### Automatic evaluation interval
-
-The automatic scheduler evaluates every 15 minutes. Each evaluation first checks the local watering window. Outside the window it updates controller status to `sleeping` with decision reason `outside_watering_window`. Inside the window it reports `monitoring`, refreshes source data when an automatic decision is eligible, and applies the daily-decision guard.
-
-Version 2.4 retains the existing one-automatic-decision-per-day execution behavior while moving the timer architecture to periodic evaluation. This avoids an unexpected change in delivered water before the full multi-pulse allocator is implemented, while establishing the correct time-window and sleep-state foundation.
-
-## Daily budget algorithm
-
-The estimated total solar production is calculated from both actual and forecast energy:
-
-```text
-estimated_total_solar_kwh = actual_solar_kwh + remaining_forecast_kwh
-```
-
-The value is normalized against Peak daily solar production:
-
-```text
-solar_factor = clamp(
-    estimated_total_solar_kwh / peak_daily_solar_production_kwh,
-    0,
-    1,
-)
-```
-
-Rain is converted into a multiplier from 1.0 down to 0.0. The daily budget is then:
-
-```text
-daily_water_budget_minutes =
-    peak_daily_water_demand_minutes
-    × solar_factor
-    × rain_factor
-```
-
-The remaining automatic budget is:
-
-```text
-remaining_budget_minutes = max(
-    0,
-    daily_water_budget_minutes - delivered_today_minutes,
-)
-```
-
-If a later forecast revision reduces the budget below the amount already delivered, the remaining budget becomes zero. The integration never attempts to “undo” irrigation and performs no further automatic watering that day.
-
-## Rolling two-hour solar history
-
-Every accepted sample stores:
-
-- timestamp;
-- cumulative energy in kWh;
-- energy delta since the previous baseline;
-- elapsed seconds;
-- normalized production rate in kWh/h.
-
-Samples older than two hours are removed by timestamp. This is safer than retaining exactly eight records because Home Assistant may restart or updates may be delayed.
-
-The integration calculates and exposes:
-
-- latest accepted energy delta;
-- energy produced in the last hour;
-- energy produced in the last two hours;
-- average rate during each window;
-- weighted rolling rate: 70% last-hour rate and 30% two-hour rate;
-- sample count and full timestamped history.
-
-The rolling signal is intentionally observational in 2.4. It provides the data required to tune the next pulse-and-soak scheduler without introducing opaque rapid-change heuristics.
-
-## Daily reset and persistence
-
-The water-delivery counters are tied to Home Assistant local calendar time. When the stored delivery date differs from the current local date, the controller resets:
-
-- delivered runtime today;
-- pulse count today;
-- the available daily budget calculation for the new day.
-
-Unused budget is never carried into the following day. The last execution result and historical diagnostic information may remain visible, but they do not add water to the new day.
-
-The reset is also checked during startup, making it safe when Home Assistant was offline at midnight. Controller state and solar history are stored per config entry.
-
-## Controller states and observability
-
-The controller status describes what the controller is doing now rather than leaving it permanently in a historical `completed` state. Version 2.4 defines meaningful states including:
-
-- `initializing`
-- `waiting_for_history`
-- `sleeping`
-- `monitoring`
-- `waiting_for_pulse`
-- `soaking`
-- `irrigating`
-- `rain_paused`
-- `daily_budget_reached`
-- `error`
-
-Legacy `idle`, `scheduled`, `running` and `completed` values are migrated safely when persisted state is loaded.
-
-Diagnostic entities expose the values needed to explain decisions:
-
-- expected, actual and remaining solar energy;
-- solar and rain factors;
-- calculated daily water budget;
-- delivered and remaining budget;
-- pulse count;
-- one-hour and two-hour solar metrics;
-- complete two-hour sample history;
-- controller status and decision reason.
-
-The guiding principle is that every irrigation decision should be explainable from visible Home Assistant state.
-
-## Manual services
+Actions use a Home Assistant configuration-entry selector, so the Solar
+Irrigation instance can be chosen from a dropdown rather than by copying an entry
+ID. Existing YAML using the legacy `entry_id` field remains accepted for backward
+compatibility, but new automations should use `config_entry_id`.
 
 ### `solar_irrigation.run_now`
 
-Starts a manual run for a selected config entry. An optional duration overrides the calculated runtime. `ignore_rain` allows an explicit operator test or emergency run despite rain protection.
+Fields:
 
-Manual runs are deliberate overrides. They are measured and visible in controller state, but the current service behavior is separate from the scheduled automatic decision guard.
+- **Configuration entry**: the Solar Irrigation instance.
+- **Duration**, optional: total pump-on minutes for this event. The duration is
+  still divided into configured pulses and soak periods.
+- **Ignore rain**: bypass both rain blocking and rain-based runtime reduction.
+
+Behavior without an explicit duration:
+
+- normal mode uses the current remaining rain-adjusted budget;
+- Ignore rain reads the actual and remaining solar inputs directly and uses the
+  current dry, solar-scaled remaining budget;
+- a configured rain sensor may be unavailable without blocking this dry override;
+- with no rain sensor, Ignore rain is harmless and produces the same dry budget.
+
+An explicit duration is an operator override. Confirmed delivery accumulates in
+the daily total and therefore influences later automatic decisions.
 
 ### `solar_irrigation.stop`
 
-Stops an active run, turns off or closes the configured irrigation entity, records actual elapsed delivery, and returns the controller to the monitoring state.
+Stops both a running pulse and a pending soak interval. During a pulse the
+actuator is stopped and elapsed delivery is accounted. During soaking the pump is
+already off and the next pulse is cancelled.
 
-## Upgrade notes for 2.4
+## Daily reset and persistence
 
-- The separate **Solar sample count** entity has been removed because the **Solar history** entity already exposes the accepted sample count as its state.
-- The complete rolling sample list remains available in the **Solar history** entity attributes and in downloaded diagnostics.
+At the first evaluation or startup detected on a new Home Assistant local date:
 
-- The manifest version is `2.4`.
-- `Daily irrigation time` is removed from new and updated configuration forms.
-- Existing `schedule_time` data is migrated automatically to **Automatic watering window start**. This preserves the previous earliest automatic run time.
-- **Automatic watering window end** defaults to `22:00:00` during migration.
-- Config-entry schema version is increased to `2`.
-- Automatic evaluation runs every 15 minutes and is blocked outside the configured window.
-- Controller status becomes `sleeping` at night and `monitoring` while the window is open.
-- Manual `run_now` and `stop` services remain available outside the automatic window.
-- Daily delivered-water counters and budget reset behavior remain tied to Home Assistant local calendar days.
+- delivered runtime resets to zero;
+- pulse count resets to zero;
+- the current daily budget is recalculated from fresh sources.
 
-## Development and validation
+Unused budget is never carried into the next day.
+
+Controller state and solar history are stored per config entry. Physical
+actuator recovery and monitoring start before the first source refresh, so a
+source outage during setup cannot bypass the pump-off safety check. If Home
+Assistant restarts during a pulse, an actuator that is still active is stopped and
+counted through the confirmed physical stop, including time beyond the requested
+pulse. If the actuator is already inactive, recovery is conservatively capped at
+the planned pulse end because the exact earlier off time is unavailable. A
+persisted stop failure keeps the active timing and is counted through later
+confirmed recovery. The event result is marked **Interrupted**. Requested event
+duration and actual delivered duration are stored separately.
+
+## Controller states
+
+- **Initializing**: persisted state is loading.
+- **Waiting for solar history**: no accepted delta sample exists and less than one
+  minute is currently due.
+- **Sleeping**: outside the automatic watering window.
+- **Monitoring**: no event is active.
+- **Waiting for pulse**: inside the window, but less than one minute is due or an
+  event has just been scheduled.
+- **Irrigating**: the physical actuator is confirmed active.
+- **Soaking**: the actuator is off between event pulses.
+- **Paused by rain**: rain currently blocks more automatic delivery.
+- **Daily budget reached**: delivered time is at or above the current budget.
+- **Error**: a source refresh, actuator start, actuator stop, or safety
+  reconciliation failed.
+
+Actuator errors remain visible until a later successful watering operation proves
+recovery. Source-data errors clear after a successful source refresh. The status
+entity includes the human-readable error message as an attribute.
+
+## Observability
+
+The integration exposes:
+
+- actual, remaining, and expected solar energy;
+- solar factor and optional rain factor;
+- current daily water budget;
+- delivered and remaining minutes today;
+- confirmed pulse count today;
+- controller status and decision reason;
+- requested and actual duration of the latest event;
+- active pulse start/end and next-pulse time;
+- the physical actuator state and whether it currently reports active flow;
+- maximum pulse and soak settings;
+- complete rolling solar history;
+- the latest error message.
+
+Controller-backed entities subscribe to controller callbacks and write their
+state immediately. They do not wait for a normal polling interval when a pulse
+starts, ends, begins soaking, is stopped externally, or enters an error state.
+
+## Installation
+
+1. Install the repository through HACS as a custom integration, or copy
+   `custom_components/solar_irrigation` into Home Assistant's
+   `custom_components` directory.
+2. Restart Home Assistant.
+3. Open **Settings -> Devices & services -> Add integration**.
+4. Select **Solar Irrigation** and configure the inputs.
+
+## Development
+
+Create the test environment:
 
 ```bash
 make setup_test_env
-make test
-make test-hassfest
 ```
 
-The integration is intentionally conservative: unavailable required data, invalid units, negative deltas and control-service failures must fail safely and remain visible through logs and diagnostics.
+Run behavioral tests:
+
+```bash
+make test-unit
+```
+
+Run branch coverage enforcement:
+
+```bash
+make test-coverage
+```
+
+Run Ruff:
+
+```bash
+make lint
+```
+
+Run the complete release quality gate, including Hassfest:
+
+```bash
+make quality
+```
+
+The strict local target is 85 percent branch coverage. Tests focus on the
+physical actuator state machine, run-soak sequencing, budget enforcement,
+configuration validation, delayed solar samples, restart recovery, immediate
+observability, diagnostics, and Home Assistant action behavior.
+
+
+### 2.5.2 test and race-condition hotfix
+
+Version 2.5.2 defers the first pulse by one event-loop checkpoint so an
+immediate stop request cannot race with actuator activation. It also fixes
+orphaned-pulse finalization after a failed stop and cleans up controller sensor
+listeners correctly in the Home Assistant test suite.
+
+## Upgrade notes for 2.5
+
+- Automatic delivery now uses true pulse-and-soak events.
+- Automatic evaluation occurs every 15 minutes and may schedule multiple events
+  per day, while never overlapping an active run or soak cycle.
+- Manual and automatic delivery share one daily counter.
+- Remaining daily budget is enforced before an event and before every automatic
+  pulse.
+- `ignore_rain` now works with calculated duration, with no rain sensor, and
+  when a configured rain sensor is unavailable.
+- Actuator start/stop state is confirmed, external state changes are reconciled,
+  and controller status remains Irrigating until physical stop is confirmed.
+- Manual actions use `config_entry_id` selectors; legacy `entry_id` YAML remains
+  accepted.
+- Maximum pulse and soak duration options were added.
+- Controller status entities are push-updated.
+- Delayed solar samples are proportionally represented in rolling windows, and
+  first/restart samples preserve the cumulative value measured since midnight.
+- Config-entry schema version 3 clamps legacy peak-demand values to the supported
+  10-240 minute range and adds pulse-and-soak defaults.

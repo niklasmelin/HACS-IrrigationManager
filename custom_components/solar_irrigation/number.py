@@ -1,14 +1,8 @@
-"""Writable tuning entities for the Solar Irrigation integration.
-
-The number platform deliberately exposes only parameters that are expected to
-change during normal operation. Fixed installation calibration, such as peak
-solar production, remains in the config entry options.
-"""
+"""Writable seasonal tuning entities for Solar Irrigation."""
 
 from __future__ import annotations
 
 from homeassistant.components.number import NumberEntity, NumberMode
-from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfTime
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
@@ -22,6 +16,7 @@ from .const import (
     MIN_PEAK_DAILY_WATER_DEMAND,
 )
 from .models import SolarIrrigationConfigEntry
+from .watering_window import entry_value
 
 
 async def async_setup_entry(
@@ -35,12 +30,13 @@ async def async_setup_entry(
 
 
 class PeakDailyWaterDemandNumber(NumberEntity):
-    """Adjust the peak-day irrigation runtime used to scale daily demand.
+    """Adjust peak-day pump-on minutes used to scale the daily water budget.
 
-    The value is expressed as total pump-on minutes per local calendar day. It
-    is both a crop-season calibration and the hard upper bound for automatic
-    irrigation. Changing it updates config-entry options, persists the value,
-    reloads the entry, and therefore recalculates the current daily budget.
+    The value is a seasonal crop-demand calibration and the hard automatic daily
+    limit before solar and rain factors are applied. It is stored in config-entry
+    options. Updating the number refreshes the calculation in place so an active
+    pulse-and-soak event is not interrupted; the event rechecks the new budget
+    before its next automatic pulse.
     """
 
     _attr_has_entity_name = True
@@ -67,26 +63,23 @@ class PeakDailyWaterDemandNumber(NumberEntity):
     def native_value(self) -> float:
         """Return the effective persisted peak daily demand in minutes."""
         return float(
-            self.entry.options.get(
+            entry_value(
+                self.entry,
                 CONF_PEAK_DAILY_WATER_DEMAND,
-                self.entry.data.get(
-                    CONF_PEAK_DAILY_WATER_DEMAND,
-                    DEFAULT_PEAK_DAILY_WATER_DEMAND,
-                ),
+                DEFAULT_PEAK_DAILY_WATER_DEMAND,
             )
         )
 
     async def async_set_native_value(self, value: float) -> None:
-        """Persist a new seasonal demand value and reload the integration.
-
-        Home Assistant validates the range before calling this method. The
-        explicit clamp protects direct/internal calls and preserves the stated
-        10-240 minute contract.
-        """
+        """Persist a clamped value and refresh calculations without a reload."""
         value = max(
             MIN_PEAK_DAILY_WATER_DEMAND,
             min(MAX_PEAK_DAILY_WATER_DEMAND, float(value)),
         )
+        runtime = self.entry.runtime_data
+        runtime.suppress_next_reload = True
         options = dict(self.entry.options)
         options[CONF_PEAK_DAILY_WATER_DEMAND] = value
         self.hass.config_entries.async_update_entry(self.entry, options=options)
+        await runtime.coordinator.async_request_refresh()
+        self.async_write_ha_state()
