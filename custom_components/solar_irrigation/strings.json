@@ -72,13 +72,27 @@
   },
   "entity": {
     "sensor": {
-      "actual_solar": {"name": "Actual solar"},
-      "remaining_solar": {"name": "Remaining solar"},
-      "expected_solar_today": {"name": "Expected solar today"},
-      "solar_scale_factor": {"name": "Solar scale factor"},
-      "rain_amount": {"name": "Rain amount"},
-      "rain_factor": {"name": "Rain factor"},
-      "irrigation_runtime": {"name": "Irrigation runtime"},
+      "actual_solar": {
+        "name": "Actual solar"
+      },
+      "remaining_solar": {
+        "name": "Remaining solar"
+      },
+      "expected_solar_today": {
+        "name": "Expected solar today"
+      },
+      "solar_scale_factor": {
+        "name": "Solar scale factor"
+      },
+      "rain_amount": {
+        "name": "Rain amount"
+      },
+      "rain_factor": {
+        "name": "Rain factor"
+      },
+      "irrigation_runtime": {
+        "name": "Irrigation runtime"
+      },
       "irrigation_status": {
         "name": "Irrigation status",
         "state": {
@@ -88,6 +102,45 @@
           "completed": "Completed",
           "error": "Error"
         }
+      },
+      "solar_latest_delta": {
+        "name": "Solar latest delta"
+      },
+      "solar_energy_last_hour": {
+        "name": "Solar energy last hour"
+      },
+      "solar_energy_last_2_hours": {
+        "name": "Solar energy last 2 hours"
+      },
+      "solar_rate_last_hour": {
+        "name": "Solar rate last hour"
+      },
+      "solar_rate_last_2_hours": {
+        "name": "Solar rate last 2 hours"
+      },
+      "solar_rolling_rate": {
+        "name": "Solar rolling rate"
+      },
+      "solar_sample_count": {
+        "name": "Solar sample count"
+      },
+      "solar_history": {
+        "name": "Solar history"
+      },
+      "daily_water_budget": {
+        "name": "Daily water budget"
+      },
+      "delivered_today": {
+        "name": "Delivered today"
+      },
+      "remaining_water_budget": {
+        "name": "Remaining water budget"
+      },
+      "pulse_count_today": {
+        "name": "Pulse count today"
+      },
+      "decision_reason": {
+        "name": "Decision reason"
       }
     }
   },
@@ -96,16 +149,28 @@
       "name": "Run irrigation now",
       "description": "Start irrigation using the calculated runtime or an optional override.",
       "fields": {
-        "entry_id": {"name": "Configuration entry", "description": "Entry ID to run."},
-        "duration": {"name": "Duration", "description": "Optional runtime in minutes."},
-        "ignore_rain": {"name": "Ignore rain", "description": "Allow a manual run despite rain."}
+        "entry_id": {
+          "name": "Configuration entry",
+          "description": "Entry ID to run."
+        },
+        "duration": {
+          "name": "Duration",
+          "description": "Optional runtime in minutes."
+        },
+        "ignore_rain": {
+          "name": "Ignore rain",
+          "description": "Allow a manual run despite rain."
+        }
       }
     },
     "stop": {
       "name": "Stop irrigation",
       "description": "Stop active irrigation.",
       "fields": {
-        "entry_id": {"name": "Configuration entry", "description": "Entry ID to stop."}
+        "entry_id": {
+          "name": "Configuration entry",
+          "description": "Entry ID to stop."
+        }
       }
     }
   }

@@ -65,6 +65,7 @@ class SolarIrrigationController:
         stored = await self._store.async_load()
         if stored:
             self.state = SolarIrrigationControllerState.from_dict(stored)
+        self._reset_daily_delivery_if_needed()
         if self.state.status is ControllerStatus.RUNNING:
             await self._async_turn_off()
             self.state.status = ControllerStatus.IDLE
@@ -82,6 +83,7 @@ class SolarIrrigationController:
     ) -> bool:
         """Start irrigation and schedule a safe stop after the selected duration."""
         async with self._lock:
+            self._reset_daily_delivery_if_needed()
             if self.is_running:
                 raise HomeAssistantError("Irrigation is already running")
             data = self.entry.runtime_data.coordinator.data
@@ -111,6 +113,7 @@ class SolarIrrigationController:
             self.state.active_end_at = started + timedelta(seconds=duration_seconds)
             self.state.last_duration_seconds = duration_seconds
             self.state.last_error = None
+            self.state.pulse_count_today += 1
             if automatic:
                 self.state.last_automatic_date = dt_util.as_local(started).date().isoformat()
             await self._async_save()
@@ -126,11 +129,20 @@ class SolarIrrigationController:
         self._run_task = None
         if task and not task.done() and task is not asyncio.current_task():
             task.cancel()
+        stopped_at = dt_util.utcnow()
+        delivered_seconds = 0
+        if self.state.active_started_at is not None:
+            delivered_seconds = max(
+                0,
+                round((stopped_at - self.state.active_started_at).total_seconds()),
+            )
         try:
             await self._async_turn_off()
         finally:
+            self._reset_daily_delivery_if_needed(stopped_at)
+            self.state.delivered_today_seconds += delivered_seconds
             self.state.status = ControllerStatus.COMPLETED
-            self.state.last_execution = dt_util.utcnow()
+            self.state.last_execution = stopped_at
             self.state.active_started_at = None
             self.state.active_end_at = None
             self.state.last_skip_reason = reason if reason != "completed" else None
@@ -191,6 +203,30 @@ class SolarIrrigationController:
             {"entity_id": self.entity_id},
             blocking=True,
         )
+
+    def delivered_today_seconds(self) -> int:
+        """Return today's delivered runtime without mutating persisted state."""
+        today = dt_util.now().date().isoformat()
+        if self.state.delivery_date != today:
+            return 0
+        return self.state.delivered_today_seconds
+
+    def pulse_count_today(self) -> int:
+        """Return today's pulse count without mutating persisted state."""
+        today = dt_util.now().date().isoformat()
+        if self.state.delivery_date != today:
+            return 0
+        return self.state.pulse_count_today
+
+    def _reset_daily_delivery_if_needed(self, timestamp=None) -> None:
+        """Reset delivered-water counters when the local calendar day changes."""
+        timestamp = timestamp or dt_util.utcnow()
+        local_date = dt_util.as_local(timestamp).date().isoformat()
+        if self.state.delivery_date == local_date:
+            return
+        self.state.delivery_date = local_date
+        self.state.delivered_today_seconds = 0
+        self.state.pulse_count_today = 0
 
     async def _async_save(self) -> None:
         """Persist current controller state for restart recovery."""

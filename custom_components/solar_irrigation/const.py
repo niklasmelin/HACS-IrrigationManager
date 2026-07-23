@@ -27,6 +27,15 @@ DEFAULT_MAX_SOLAR: Final = 65.0
 DEFAULT_MAX_RUNTIME: Final = 60.0
 DEFAULT_RAIN_SKIP_THRESHOLD: Final = 5.0
 DEFAULT_UPDATE_INTERVAL: Final = 3600
+
+# Solar history sampling. The coordinator may refresh more often, but a sample is
+# stored at most every 15 minutes and history is retained for two hours.
+SOLAR_SAMPLE_INTERVAL_SECONDS: Final = 15 * 60
+SOLAR_SAMPLE_MIN_ELAPSED_SECONDS: Final = 12 * 60
+SOLAR_HISTORY_WINDOW_SECONDS: Final = 2 * 60 * 60
+SOLAR_RECENT_WINDOW_SECONDS: Final = 60 * 60
+SOLAR_HISTORY_STORAGE_VERSION: Final = 1
+SOLAR_HISTORY_STORAGE_KEY_TEMPLATE: Final = f"{DOMAIN}.solar_history.{{entry_id}}"
 DEFAULT_SCHEDULE_TIME: Final = "06:00:00"
 
 MIN_MAX_SOLAR: Final = 0.001
