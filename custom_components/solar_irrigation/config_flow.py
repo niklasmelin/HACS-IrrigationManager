@@ -107,54 +107,82 @@ class SolarIrrigationOptionsFlow(config_entries.OptionsFlow):
 
 
 def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
-    """Build the user-facing schema with an optional rain sensor."""
+    """Build the user-facing configuration schema.
+
+    The schema configures the solar-energy inputs, irrigation output,
+    optional rain input, peak solar calibration, peak daily water demand,
+    coordinator update interval, and the automatic watering window.
+
+    Args:
+        defaults: Existing config-entry or options values used as suggested
+            values and defaults when editing the integration.
+
+    Returns:
+        A voluptuous schema suitable for both the config flow and options flow.
+    """
     values = defaults or {}
+
     return vol.Schema(
         {
             vol.Required(
                 CONF_SOLAR_SENSOR,
-                description={"suggested_value": values.get(CONF_SOLAR_SENSOR)},
+                description={
+                    "suggested_value": values.get(CONF_SOLAR_SENSOR)
+                },
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Required(
                 CONF_REMAINING_SENSOR,
-                description={"suggested_value": values.get(CONF_REMAINING_SENSOR)},
+                description={
+                    "suggested_value": values.get(CONF_REMAINING_SENSOR)
+                },
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Required(
                 CONF_IRRIGATION_ENTITY,
-                description={"suggested_value": values.get(CONF_IRRIGATION_ENTITY)},
+                description={
+                    "suggested_value": values.get(CONF_IRRIGATION_ENTITY)
+                },
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain=["switch", "valve"])
             ),
             vol.Optional(
                 CONF_RAIN_SENSOR,
-                description={"suggested_value": values.get(CONF_RAIN_SENSOR)},
+                description={
+                    "suggested_value": values.get(CONF_RAIN_SENSOR)
+                },
             ): selector.EntitySelector(
                 selector.EntitySelectorConfig(domain="sensor")
             ),
             vol.Required(
                 CONF_MAX_SOLAR,
-                default=values.get(CONF_MAX_SOLAR, DEFAULT_MAX_SOLAR),
+                default=values.get(
+                    CONF_MAX_SOLAR,
+                    DEFAULT_MAX_SOLAR,
+                ),
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=MIN_MAX_SOLAR,
                     max=MAX_MAX_SOLAR,
                     step=0.1,
                     mode=selector.NumberSelectorMode.BOX,
+                    unit_of_measurement="kWh",
                 )
             ),
             vol.Required(
                 CONF_MAX_RUNTIME,
-                default=values.get(CONF_MAX_RUNTIME, DEFAULT_MAX_RUNTIME),
+                default=values.get(
+                    CONF_MAX_RUNTIME,
+                    DEFAULT_MAX_RUNTIME,
+                ),
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=MIN_MAX_RUNTIME,
                     max=MAX_MAX_RUNTIME,
                     step=1,
-                    unit_of_measurement="min",
+                    unit_of_measurement="min/day",
                     mode=selector.NumberSelectorMode.BOX,
                 )
             ),
@@ -175,7 +203,10 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
             ),
             vol.Required(
                 CONF_UPDATE_INTERVAL,
-                default=values.get(CONF_UPDATE_INTERVAL, DEFAULT_UPDATE_INTERVAL),
+                default=values.get(
+                    CONF_UPDATE_INTERVAL,
+                    DEFAULT_UPDATE_INTERVAL,
+                ),
             ): selector.NumberSelector(
                 selector.NumberSelectorConfig(
                     min=MIN_UPDATE_INTERVAL,
@@ -186,14 +217,21 @@ def _schema(defaults: dict[str, Any] | None = None) -> vol.Schema:
                 )
             ),
             vol.Required(
-                CONF_SCHEDULE_TIME,
-    CONF_WATERING_WINDOW_END,
-    CONF_WATERING_WINDOW_START,
-                default=values.get(CONF_SCHEDULE_TIME, DEFAULT_SCHEDULE_TIME),
+                CONF_WATERING_WINDOW_START,
+                default=values.get(
+                    CONF_WATERING_WINDOW_START,
+                    DEFAULT_WATERING_WINDOW_START,
+                ),
+            ): selector.TimeSelector(),
+            vol.Required(
+                CONF_WATERING_WINDOW_END,
+                default=values.get(
+                    CONF_WATERING_WINDOW_END,
+                    DEFAULT_WATERING_WINDOW_END,
+                ),
             ): selector.TimeSelector(),
         }
     )
-
 
 def _validate_input(hass: HomeAssistant, user_input: dict[str, Any]) -> dict[str, str]:
     """Return field-specific validation errors for configured entities and limits."""
