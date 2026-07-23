@@ -151,6 +151,7 @@ async def async_setup_entry(
     )
     entry.runtime_data = runtime
     await controller.async_load()
+    await controller.async_start_monitoring()
 
     runtime.remove_update_listener = entry.add_update_listener(_async_reload_entry)
     runtime.cancel_schedule = _schedule_automatic_evaluation(hass, entry)

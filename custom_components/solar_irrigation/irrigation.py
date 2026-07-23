@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import timedelta
 
-from homeassistant.core import HomeAssistant
+from homeassistant.const import STATE_ON, STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.core import Event, EventStateChangedData, HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.event import async_track_state_change_event
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -39,6 +42,8 @@ class SolarIrrigationController:
         self.state = SolarIrrigationControllerState()
         self._lock = asyncio.Lock()
         self._run_task: asyncio.Task[None] | None = None
+        self._remove_entity_listener: Callable[[], None] | None = None
+        self._stopping = False
         self._store: Store[dict[str, object]] = Store(
             hass,
             STORAGE_VERSION,
@@ -75,6 +80,110 @@ class SolarIrrigationController:
             await self._async_save()
         elif self.state.status is ControllerStatus.INITIALIZING:
             self.state.status = ControllerStatus.MONITORING
+            await self._async_save()
+
+    async def async_start_monitoring(self) -> None:
+        """Subscribe to irrigation-entity state changes.
+
+        The controller timer represents the intended run, while the configured
+        switch or valve represents the actual irrigation state. External
+        automations, manual operation, device protections, or integration
+        failures can turn the entity off before the timer ends. This listener
+        reconciles persistent controller state with the physical entity so the
+        status cannot remain ``irrigating`` after watering has stopped.
+        """
+        if self._remove_entity_listener is not None:
+            return
+        self._remove_entity_listener = async_track_state_change_event(
+            self.hass,
+            [self.entity_id],
+            self._async_irrigation_entity_changed,
+        )
+
+    async def _async_irrigation_entity_changed(
+        self,
+        event: Event[EventStateChangedData],
+    ) -> None:
+        """Reconcile a changed pump or valve state with controller state.
+
+        State changes caused by the controller's own stop sequence are ignored
+        because that sequence performs its own accounting and persistence. An
+        unexpected inactive state ends the active run without issuing another
+        turn-off service call. Unknown or unavailable states terminate the run
+        and expose an error because actual water delivery can no longer be
+        confirmed.
+        """
+        if self._stopping:
+            return
+        new_state = event.data.get("new_state")
+        if new_state is None:
+            return
+        expected_active = (
+            self.is_running or self.state.status is ControllerStatus.IRRIGATING
+        )
+        if not expected_active:
+            return
+        if new_state.state in {STATE_UNKNOWN, STATE_UNAVAILABLE}:
+            await self._async_reconcile_external_stop(
+                reason="irrigation_entity_unavailable",
+                error=f"Irrigation entity became {new_state.state}",
+            )
+            return
+        if not self._entity_state_is_active(new_state.state):
+            await self._async_reconcile_external_stop(
+                reason="irrigation_entity_turned_off",
+            )
+
+    def _entity_state_is_active(self, state: str) -> bool:
+        """Return whether an entity state means that irrigation is active."""
+        domain = self.entity_id.split(".", 1)[0]
+        if domain == "valve":
+            return state in {"open", "opening"}
+        return state == STATE_ON
+
+    async def _async_reconcile_external_stop(
+        self,
+        *,
+        reason: str,
+        error: str | None = None,
+    ) -> None:
+        """Finish accounting after the irrigation entity stops externally.
+
+        This method deliberately does not call the entity's turn-off service:
+        the observed state already confirms that watering is inactive. It
+        cancels the internal duration timer, records the elapsed delivery, and
+        updates the visible status to monitoring or error.
+        """
+        async with self._lock:
+            if not (
+                self.is_running
+                or self.state.status is ControllerStatus.IRRIGATING
+            ):
+                return
+            task = self._run_task
+            self._run_task = None
+            if task and not task.done() and task is not asyncio.current_task():
+                task.cancel()
+            stopped_at = dt_util.utcnow()
+            delivered_seconds = 0
+            if self.state.active_started_at is not None:
+                delivered_seconds = max(
+                    0,
+                    round(
+                        (stopped_at - self.state.active_started_at).total_seconds()
+                    ),
+                )
+            self._reset_daily_delivery_if_needed(stopped_at)
+            self.state.delivered_today_seconds += delivered_seconds
+            self.state.status = (
+                ControllerStatus.ERROR if error else ControllerStatus.MONITORING
+            )
+            self.state.last_execution = stopped_at
+            self.state.active_started_at = None
+            self.state.active_end_at = None
+            self.state.last_skip_reason = reason
+            self.state.decision_reason = reason
+            self.state.last_error = error
             await self._async_save()
 
     async def async_run(
@@ -140,9 +249,11 @@ class SolarIrrigationController:
                 0,
                 round((stopped_at - self.state.active_started_at).total_seconds()),
             )
+        self._stopping = True
         try:
             await self._async_turn_off()
         finally:
+            self._stopping = False
             self._reset_daily_delivery_if_needed(stopped_at)
             self.state.delivered_today_seconds += delivered_seconds
             self.state.status = ControllerStatus.MONITORING
@@ -150,7 +261,9 @@ class SolarIrrigationController:
             self.state.active_started_at = None
             self.state.active_end_at = None
             self.state.last_skip_reason = reason if reason != "completed" else None
-            self.state.decision_reason = "run_completed" if reason == "completed" else reason
+            self.state.decision_reason = (
+                "run_completed" if reason == "completed" else reason
+            )
             await self._async_save()
 
     async def async_record_skip(self, reason: str, *, automatic: bool) -> None:
@@ -197,7 +310,10 @@ class SolarIrrigationController:
             await self._async_save()
 
     async def async_shutdown(self) -> None:
-        """Cancel timers and leave an active irrigation entity safely off."""
+        """Remove listeners, cancel timers, and leave irrigation safely off."""
+        if self._remove_entity_listener is not None:
+            self._remove_entity_listener()
+            self._remove_entity_listener = None
         if self.is_running or self.state.status is ControllerStatus.IRRIGATING:
             await self.async_stop("integration_unloaded")
 
