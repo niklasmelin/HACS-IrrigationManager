@@ -412,7 +412,7 @@ def _decision_reason(entry: SolarIrrigationConfigEntry) -> str:
     """Return a concise explanation of the current controller decision."""
     controller = entry.runtime_data.controller
     data = entry.runtime_data.coordinator.data
-    if controller.state.status is ControllerStatus.RUNNING:
+    if controller.state.status is ControllerStatus.IRRIGATING:
         return "irrigation_running"
     if controller.state.status is ControllerStatus.ERROR:
         return "controller_error"

@@ -66,12 +66,15 @@ class SolarIrrigationController:
         if stored:
             self.state = SolarIrrigationControllerState.from_dict(stored)
         self._reset_daily_delivery_if_needed()
-        if self.state.status is ControllerStatus.RUNNING:
+        if self.state.status is ControllerStatus.IRRIGATING:
             await self._async_turn_off()
-            self.state.status = ControllerStatus.IDLE
+            self.state.status = ControllerStatus.MONITORING
             self.state.active_started_at = None
             self.state.active_end_at = None
             self.state.last_error = "Recovered from an interrupted irrigation run"
+            await self._async_save()
+        elif self.state.status is ControllerStatus.INITIALIZING:
+            self.state.status = ControllerStatus.MONITORING
             await self._async_save()
 
     async def async_run(
@@ -108,7 +111,7 @@ class SolarIrrigationController:
                 return False
             await self._async_turn_on()
             started = dt_util.utcnow()
-            self.state.status = ControllerStatus.RUNNING
+            self.state.status = ControllerStatus.IRRIGATING
             self.state.active_started_at = started
             self.state.active_end_at = started + timedelta(seconds=duration_seconds)
             self.state.last_duration_seconds = duration_seconds
@@ -141,7 +144,7 @@ class SolarIrrigationController:
         finally:
             self._reset_daily_delivery_if_needed(stopped_at)
             self.state.delivered_today_seconds += delivered_seconds
-            self.state.status = ControllerStatus.COMPLETED
+            self.state.status = ControllerStatus.MONITORING
             self.state.last_execution = stopped_at
             self.state.active_started_at = None
             self.state.active_end_at = None
@@ -151,7 +154,7 @@ class SolarIrrigationController:
     async def async_record_skip(self, reason: str, *, automatic: bool) -> None:
         """Record a safe skipped run without operating the irrigation entity."""
         now = dt_util.utcnow()
-        self.state.status = ControllerStatus.COMPLETED
+        self.state.status = ControllerStatus.MONITORING
         self.state.last_execution = now
         self.state.last_skip_reason = reason
         self.state.last_duration_seconds = 0
@@ -165,7 +168,7 @@ class SolarIrrigationController:
 
     async def async_shutdown(self) -> None:
         """Cancel timers and leave an active irrigation entity safely off."""
-        if self.is_running or self.state.status is ControllerStatus.RUNNING:
+        if self.is_running or self.state.status is ControllerStatus.IRRIGATING:
             await self.async_stop("integration_unloaded")
 
     async def _async_complete_after(self, duration_seconds: int) -> None:

@@ -115,7 +115,7 @@ class SolarIrrigationData:
 class SolarIrrigationControllerState:
     """Track persistent and observable controller state."""
 
-    status: ControllerStatus = ControllerStatus.IDLE
+    status: ControllerStatus = ControllerStatus.INITIALIZING
     last_execution: datetime | None = None
     active_started_at: datetime | None = None
     active_end_at: datetime | None = None
@@ -147,7 +147,7 @@ class SolarIrrigationControllerState:
     def from_dict(cls, data: dict[str, Any]) -> SolarIrrigationControllerState:
         """Create controller state from persisted storage data."""
         return cls(
-            status=ControllerStatus(data.get("status", ControllerStatus.IDLE)),
+            status=_parse_controller_status(data.get("status")),
             last_execution=_parse_datetime(data.get("last_execution")),
             active_started_at=_parse_datetime(data.get("active_started_at")),
             active_end_at=_parse_datetime(data.get("active_end_at")),
@@ -182,3 +182,27 @@ def _isoformat(value: datetime | None) -> str | None:
 def _parse_datetime(value: str | None) -> datetime | None:
     """Parse an optional ISO-formatted datetime value."""
     return datetime.fromisoformat(value) if value else None
+
+
+def _parse_controller_status(value: Any) -> ControllerStatus:
+    """Translate persisted legacy status strings into the 2.2 state model.
+
+    Versions before 2.2 used ``idle``, ``scheduled``, ``running`` and
+    ``completed`` as long-lived controller states. Version 2.2 separates the
+    current operating state from the result of the previous run, so both idle
+    and completed safely map to monitoring. Unknown values also map to
+    monitoring to avoid blocking startup after an upgrade.
+    """
+    legacy = {
+        "idle": ControllerStatus.MONITORING,
+        "scheduled": ControllerStatus.WAITING_FOR_PULSE,
+        "running": ControllerStatus.IRRIGATING,
+        "completed": ControllerStatus.MONITORING,
+    }
+    raw = str(value or "monitoring")
+    if raw in legacy:
+        return legacy[raw]
+    try:
+        return ControllerStatus(raw)
+    except ValueError:
+        return ControllerStatus.MONITORING

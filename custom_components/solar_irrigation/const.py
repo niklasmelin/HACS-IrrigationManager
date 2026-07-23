@@ -8,14 +8,16 @@ from typing import Final
 from homeassistant.const import Platform, UnitOfEnergy, UnitOfLength, UnitOfTime
 
 DOMAIN: Final = "solar_irrigation"
-PLATFORMS: Final[tuple[Platform, ...]] = (Platform.SENSOR,)
+PLATFORMS: Final[tuple[Platform, ...]] = (Platform.SENSOR, Platform.NUMBER)
 
 CONF_SOLAR_SENSOR: Final = "solar_sensor"
 CONF_REMAINING_SENSOR: Final = "remaining_sensor"
 CONF_IRRIGATION_ENTITY: Final = "irrigation_entity"
 CONF_RAIN_SENSOR: Final = "rain_sensor"
 CONF_MAX_SOLAR: Final = "max_solar"
-CONF_MAX_RUNTIME: Final = "max_runtime"
+CONF_PEAK_DAILY_WATER_DEMAND: Final = "max_runtime"
+# Backward-compatible alias for storage/config entries created before 2.2.
+CONF_MAX_RUNTIME: Final = CONF_PEAK_DAILY_WATER_DEMAND
 CONF_RAIN_SKIP_THRESHOLD: Final = "rain_skip_threshold"
 CONF_UPDATE_INTERVAL: Final = "update_interval"
 CONF_SCHEDULE_TIME: Final = "schedule_time"
@@ -24,7 +26,8 @@ CONF_DURATION: Final = "duration"
 CONF_IGNORE_RAIN: Final = "ignore_rain"
 
 DEFAULT_MAX_SOLAR: Final = 65.0
-DEFAULT_MAX_RUNTIME: Final = 60.0
+DEFAULT_PEAK_DAILY_WATER_DEMAND: Final = 60.0
+DEFAULT_MAX_RUNTIME: Final = DEFAULT_PEAK_DAILY_WATER_DEMAND
 DEFAULT_RAIN_SKIP_THRESHOLD: Final = 5.0
 DEFAULT_UPDATE_INTERVAL: Final = 3600
 
@@ -40,8 +43,10 @@ DEFAULT_SCHEDULE_TIME: Final = "06:00:00"
 
 MIN_MAX_SOLAR: Final = 0.001
 MAX_MAX_SOLAR: Final = 10_000.0
-MIN_MAX_RUNTIME: Final = 0.0
-MAX_MAX_RUNTIME: Final = 1_440.0
+MIN_PEAK_DAILY_WATER_DEMAND: Final = 10.0
+MAX_PEAK_DAILY_WATER_DEMAND: Final = 240.0
+MIN_MAX_RUNTIME: Final = MIN_PEAK_DAILY_WATER_DEMAND
+MAX_MAX_RUNTIME: Final = MAX_PEAK_DAILY_WATER_DEMAND
 MIN_RAIN_SKIP_THRESHOLD: Final = 0.1
 MAX_RAIN_SKIP_THRESHOLD: Final = 1_000.0
 MIN_UPDATE_INTERVAL: Final = 60
@@ -80,8 +85,19 @@ STORAGE_KEY_TEMPLATE: Final = f"{DOMAIN}.{{entry_id}}"
 class ControllerStatus(StrEnum):
     """Represent the current irrigation-controller status."""
 
-    IDLE = "idle"
-    SCHEDULED = "scheduled"
-    RUNNING = "running"
-    COMPLETED = "completed"
+    INITIALIZING = "initializing"
+    WAITING_FOR_HISTORY = "waiting_for_history"
+    SLEEPING = "sleeping"
+    MONITORING = "monitoring"
+    WAITING_FOR_PULSE = "waiting_for_pulse"
+    SOAKING = "soaking"
+    IRRIGATING = "irrigating"
+    RAIN_PAUSED = "rain_paused"
+    DAILY_BUDGET_REACHED = "daily_budget_reached"
     ERROR = "error"
+
+    # Legacy aliases retained so persisted 1.x/2.1 state can be loaded safely.
+    IDLE = "monitoring"
+    SCHEDULED = "waiting_for_pulse"
+    RUNNING = "irrigating"
+    COMPLETED = "monitoring"

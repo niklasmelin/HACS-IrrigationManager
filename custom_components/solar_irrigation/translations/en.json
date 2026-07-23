@@ -10,8 +10,8 @@
           "remaining_sensor": "Remaining solar forecast sensor",
           "irrigation_entity": "Irrigation switch or valve",
           "rain_sensor": "Rain sensor (optional)",
-          "max_solar": "Solar production for full irrigation",
-          "max_runtime": "Maximum irrigation runtime",
+          "max_solar": "Peak daily solar production",
+          "max_runtime": "Initial peak daily water demand",
           "rain_skip_threshold": "Rain amount that skips irrigation",
           "update_interval": "Calculation update interval",
           "schedule_time": "Daily irrigation time"
@@ -25,8 +25,8 @@
           "remaining_sensor": "Remaining solar forecast sensor",
           "irrigation_entity": "Irrigation switch or valve",
           "rain_sensor": "Rain sensor (optional)",
-          "max_solar": "Solar production for full irrigation",
-          "max_runtime": "Maximum irrigation runtime",
+          "max_solar": "Peak daily solar production",
+          "max_runtime": "Initial peak daily water demand",
           "rain_skip_threshold": "Rain amount that skips irrigation",
           "update_interval": "Calculation update interval",
           "schedule_time": "Daily irrigation time"
@@ -54,8 +54,8 @@
           "remaining_sensor": "Remaining solar forecast sensor",
           "irrigation_entity": "Irrigation switch or valve",
           "rain_sensor": "Rain sensor (optional)",
-          "max_solar": "Solar production for full irrigation",
-          "max_runtime": "Maximum irrigation runtime",
+          "max_solar": "Peak daily solar production",
+          "max_runtime": "Initial peak daily water demand",
           "rain_skip_threshold": "Rain amount that skips irrigation",
           "update_interval": "Calculation update interval",
           "schedule_time": "Daily irrigation time"
@@ -94,7 +94,7 @@
         "name": "Irrigation runtime"
       },
       "irrigation_status": {
-        "name": "Irrigation status",
+        "name": "Irrigation controller status",
         "state": {
           "idle": "Idle",
           "scheduled": "Scheduled",
@@ -141,6 +141,11 @@
       },
       "decision_reason": {
         "name": "Decision reason"
+      }
+    },
+    "number": {
+      "peak_daily_water_demand": {
+        "name": "Peak daily water demand"
       }
     }
   },
